@@ -110,7 +110,7 @@ module Make(M : Monad.S) = struct
          | Some m -> List.take m.stack 5 |> List.map ~f:snd in
        match List.filter_map locs ~f:(location_addr s.hist) with
        | [] -> !! ()
-       | addr :: locs ->
+       | (addr :: _) as locs ->
           let inc = Incident.create kind addr ~path ~locs in
           S.update (fun s -> {s with incs = inc :: s.incs})
 
