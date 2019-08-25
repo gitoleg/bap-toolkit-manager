@@ -3,16 +3,20 @@ open Bap_report_common
 
 type t [@@deriving bin_io, compare, sexp]
 
-val create :
-  ?trace:string list -> ?machine:string -> ?data:string list -> check -> string list -> t
+type kind  [@@deriving bin_io, compare, sexp]
 
-val add_data : t -> string list -> t
+val kind_of_string : string -> kind
+val string_of_kind : kind -> string
 
-val check : t -> check
-val trace : t -> string list
-val locations : t -> string list
-val machine : t -> string option
-val data : t -> string list
+
+val create : ?path:string list ->
+             ?locs:addr list -> kind -> addr -> t
+
+val addr : t -> addr
+val locations : t -> addr list
+val path : t -> string list
+val kind : t -> kind
+
 
 module Map : Map.S with type Key.t = t
 module Set : Set.S with type Elt.t = t

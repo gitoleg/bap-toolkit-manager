@@ -5,7 +5,6 @@ open Bap_report_read_types
 
 module Parse = Bap_report_parse_incidents
 
-
 type machine = {
   pid : string;
   pc  : addr;
@@ -17,10 +16,16 @@ type t = {
   cur   : machine_id option;
   machs : machine Machine_id.Map.t;
   hist  : addr list Location_id.Map.t;
-  syms  : addr String.Map.t;
+  syms  : string Addr.Map.t;
   calls : string list Addr.Map.t;
   incs  : incident list
 }
+
+type incident_data =
+  | Name of string
+  | Locations of addr * addr list
+  | Path of string list
+
 
 module Make(M : Monad.S) = struct
   module S =
@@ -30,16 +35,11 @@ module Make(M : Monad.S) = struct
 
   open S.Syntax
 
-  let check_of_string name =
-    try
-      let name = String.map ~f:(fun c -> if c = '-' then '_' else c) name in
-      let name = String.capitalize name in
-      Some (check_of_sexp (Sexp.of_string name))
-    with _ -> None
-
   let unresolved = "__primus_linker_unresolved_call"
 
-  let new_machine pid = {pid;stack=[];pc=""; prev_pc=None;}
+  let new_machine pid =
+    let pc = Addr.of_string "0" in
+    {pid;stack=[];pc; prev_pc=None;}
 
   let stack_top_name = function
     | [] -> None
@@ -88,8 +88,9 @@ module Make(M : Monad.S) = struct
       | (pc,name') :: stack' when name = name' ->
          let calls =
            if m.pc = pc then
-             (* for lisp calls, want be sure it is in calls:
-                 i.e. there aren't pc-change event between
+             (*  rewrite:
+                 for lisp calls, want be sure it is in calls:
+                 i.e. there wasn't pc-change event between
                  call  and call-return, therefore the
                  correct address of the can be infered like that *)
              let last_few = name :: (List.take stack' 5 |> List.map ~f:snd) in
@@ -100,21 +101,18 @@ module Make(M : Monad.S) = struct
     update_machine {m with stack} >>= fun () ->
     S.update (fun s -> {s with calls})
 
-  let incident name locs =
+  let incident kind locs =
     let location_addr hist id = Option.(Map.find hist id >>= List.hd) in
-    match check_of_string name with
-    | None -> !! ()
-    | Some check ->
        S.get () >>= fun s ->
        machine >>= fun m ->
-       let trace,machine = match m with
-         | None -> [],None
-         | Some m ->
-            List.take m.stack 5 |> List.map ~f:snd,
-            Some m.pid in
-       let locs = List.filter_map locs ~f:(location_addr s.hist) in
-       let inc = Incident.create ~trace ?machine check locs in
-       S.update (fun s -> {s with incs = inc :: s.incs})
+       let path = match m with
+         | None -> []
+         | Some m -> List.take m.stack 5 |> List.map ~f:snd in
+       match List.filter_map locs ~f:(location_addr s.hist) with
+       | [] -> !! ()
+       | addr :: locs ->
+          let inc = Incident.create kind addr ~path ~locs in
+          S.update (fun s -> {s with incs = inc :: s.incs})
 
   let incident_location (id,addrs) =
     S.update (fun s -> {s with hist = Map.set s.hist ~key:id ~data:addrs})
@@ -162,66 +160,68 @@ end
 
 module Main = Make(Monad.Ident)
 
-
 module Data_format = struct
 
-  let symbol_name s inc =
+  let in_function s inc =
     match Incident.locations inc with
     | [] -> None
     | a :: _ ->
        match Map.find s.syms a with
-       | Some name -> Some [name]
-       | _ ->  Some [a]
+       | Some n -> Some (Name n)
+       | _ ->  None
 
-  let null_deref _ inc =
-    let trace = Incident.trace inc in
+  let incident_locations s inc =
     match Incident.locations inc with
-    | event :: _ ->
-       let last = Option.value ~default:"" (List.hd trace) in
-       Some [last;event]
-    | _ -> None
+    | [] -> None
+    | inc :: locs -> Some (Locations (inc, locs))
 
-  let unused_return s inc =
+  let path s inc =
     match Incident.locations inc with
     | [] -> None
     | a :: _ ->
-      match Map.find s.calls a with
-      | Some (name :: prev :: _ )->
-         Some  [prev; name; a]
-      | Some (name :: [])->
-         Some ["-----"; name; a]
-      | _ -> None
+       match Map.find s.calls a with
+       | None -> None
+       | Some names -> Some (Path names)
 
-  let use_after_free _ inc =
-    match Incident.locations inc with
-    | use :: free :: alloc :: _ -> Some [use; free; alloc]
-    | _ -> None
+
+  (* let symbol_name s inc =
+   *   let a = Incident.addr inc in
+   *   match Map.find s.syms a with
+   *   | Some name -> Some [name]
+   *   | _ ->  Some [Addr.to_string a]
+   *
+   * let null_deref _ inc =
+   *   let trace = Incident.path inc in
+   *   match Incident.locations inc with
+   *   | event :: _ ->
+   *      let last = Option.value ~default:"" (List.hd trace) in
+   *      Some [last;event]
+   *   | _ -> None
+   *
+   * let unused_return s inc =
+   *   match Incident.locations inc with
+   *   | [] -> None
+   *   | a :: _ ->
+   *     match Map.find s.calls a with
+   *     | Some (name :: prev :: _ )->
+   *        Some  [prev; name; a]
+   *     | Some (name :: [])->
+   *        Some ["-----"; name; a]
+   *     | _ -> None
+   *
+   * let use_after_free _ inc =
+   *   match Incident.locations inc with
+   *   | use :: free :: alloc :: _ -> Some [use; free; alloc]
+   *   | _ -> None *)
 
 end
 
-let collect results =
-  let update acc inc f =
-    match f results inc with
-    | None -> acc
-    | Some data ->
-       let inc = Incident.add_data inc data in
-       inc :: acc in
-  List.fold results.incs ~init:[]
-    ~f:(fun arti inc ->
-      let f =
-        match Incident.check inc with
-        | Forbidden_function | Complex_function
-        | Non_structural_cfg | Recursive_function -> Data_format.symbol_name
-        | Unused_return_value -> Data_format.unused_return
-        | Null_ptr_deref -> Data_format.null_deref
-        | Memcheck_use_after_release -> Data_format.use_after_free
-        | _ -> (fun _ _ -> None) in
-      update arti inc f)
-
 let read ch =
   let empty = Map.empty (module String) in
-  let fresh = {cur = None; hist=empty;
-               calls=empty;syms=empty;
+  let fresh = {cur = None;
+               hist=empty;
+               calls=Map.empty (module Addr);
+               syms=Map.empty (module Addr);
                machs=empty;incs=[]} in
   let results = Monad.State.exec (Main.run ch) fresh in
-  collect results
+  results.incs
