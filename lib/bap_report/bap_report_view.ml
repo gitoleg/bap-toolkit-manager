@@ -1,17 +1,19 @@
 open Core_kernel
 open Bap_report_types
 
-
 type col =
   | Path of int (* deep  *)
   | Name
   | Addr
-  | Locs
+  | Locations
+[@@deriving sexp]
 
 type info =
   | Web of string
   | Tab of col list
   | Alias of string
+[@@deriving sexp]
+
 
 type t = info list String.Table.t
 
@@ -53,7 +55,7 @@ let data t inc =
       | Tab cols -> Some cols
       | _ -> None) in
   let cols = match cols with
-    | None ->[Name;Addr]
+    | None -> [Name; Addr]
     | Some cols -> cols in
   List.rev @@
     List.fold cols ~init:[] ~f:(fun acc -> function
@@ -61,6 +63,53 @@ let data t inc =
            (List.rev (List.take (Incident.path inc) n)) @ acc
         | Name -> name t kind :: acc
         | Addr -> Addr.to_string (Incident.addr inc) :: acc
-        | Locs ->
+        | Locations ->
            let addrs = Locations.addrs (Incident.locations inc) in
            List.rev_map ~f:Addr.to_string addrs @ acc)
+
+let read_sexp ch =
+  try Sexp.input_sexp ch |> Option.some
+  with _ -> None
+
+let get_alias data =
+  match data with
+  | [Sexp.Atom x] -> Some (Alias x)
+  | _ -> None
+
+let get_web data =
+  match data with
+  | [Sexp.Atom x] -> Some ( Web x)
+  | _ -> None
+
+let get_tab data =
+  try
+    Some (Tab (List.map data ~f:col_of_sexp))
+  with _ -> None
+
+let info_of_sexp s =
+  let open Sexp in
+  match s with
+  | List (Atom s :: Atom kind :: data) ->
+     let data =  match s with
+       | "alias" -> get_alias data
+       | "web"   -> get_web data
+       | "tab"   -> get_tab data
+       | _ -> None in
+     Option.value_map data ~default:None ~f:(fun x -> Some (kind,x))
+  | _ -> None
+
+let read ch =
+  let t = create () in
+  let rec loop ()  =
+    match read_sexp ch with
+    | None -> ()
+    | Some s ->
+       match info_of_sexp s with
+       | None -> loop ()
+       | Some (kind,info) ->
+          update t (Incident_kind.of_string kind) info;
+          loop () in
+  loop ();
+  t
+
+let of_file fname = In_channel.with_file fname ~f:read

@@ -5,6 +5,7 @@ open Bap_report_utils
 module Filename = Caml.Filename
 module Docker = Bap_report_docker
 
+module Tool = Bap_report_tool
 
 let with_tag ?tag image =
   match tag with
@@ -33,7 +34,7 @@ type t =  {
     time : float;
   }
 
-let tool = "binaryanalysisplatform/bap-toolkit"
+
 let drive = "/mydrive"
 let pwd = Sys.getcwd
 
@@ -41,7 +42,7 @@ let pwd = Sys.getcwd
 let name t = t.name
 let description t = t.desc
 
-let list () =
+let list ?(tool=Tool.default) () =
   let recipe_of_string s =
     match split_on_first ~on:[' '; '\t'] s with
     | name :: desc :: _ ->
@@ -49,7 +50,9 @@ let list () =
        let desc = String.strip desc in
        Some {name;desc;time = 0.0}
     | _ -> None in
-  match Docker.run ~image:tool "--list-recipes" with
+  let tag = Tool.tag tool in
+  let image = Tool.name tool in
+  match Docker.run ?tag ~image "--list-recipes" with
   | None | Some "" -> []
   | Some r ->
      let rs = String.split ~on:'\n' r in
@@ -85,12 +88,14 @@ let copy_target ?image ?tag ~path alias =
        Docker.run ~mount:(pwd (), drive) ~image:(with_tag ?tag image)
        @@ sprintf "cp %s %s/%s" path drive alias
 
-let run ?image ?tag path t =
+let run ?(tool=Tool.default) ?image ?tag path t =
   let alias = Filename.temp_file ~temp_dir:(pwd ()) "artifact" "" in
   copy_target ?image ?tag ~path (Filename.basename alias);
   let entry = entry (Filename.basename alias) t.name in
   let start = Unix.gettimeofday () in
-  let _ = Docker.run ~image:tool ~mount:(pwd (), drive)
+  let tag = Tool.tag tool in
+  let image = Tool.name tool in
+  let _ = Docker.run ?tag ~image ~mount:(pwd (), drive)
             ~entry:(sprintf "%s/%s" drive @@ Filename.basename entry) "" in
   let finish = Unix.gettimeofday () in
   Sys.remove alias;

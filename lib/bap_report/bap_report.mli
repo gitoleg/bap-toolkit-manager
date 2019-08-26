@@ -35,6 +35,7 @@ module Std : sig
 
   end
 
+  type tool
   type recipe
   type artifact
   type addr [@@deriving bin_io,compare,sexp]
@@ -59,6 +60,25 @@ module Std : sig
   type incident_id   [@@deriving bin_io, compare, sexp]
   type confirmation  [@@deriving bin_io, compare, sexp]
 
+
+  module Tool : sig
+
+    type t = tool
+
+    (** [default] is the binaryanalysisplatform/bap-toolkit docker image *)
+    val default : t
+
+    (** [of_string name] creates a new tool from string.
+        Returns Error if name can't be a proper docker image name.
+        Image tag can be fed with ":" separator. *)
+    val of_string : string -> t Or_error.t
+
+    val tag : t -> string option
+    val name : t -> string
+
+  end
+
+
   module Recipe : sig
 
     type t = recipe
@@ -67,8 +87,10 @@ module Std : sig
       not recipe found *)
     val find : string -> t option
 
-    (** [list () ] returns the list of available recipes  *)
-    val list : unit -> t list
+    (** [list ~tool () ] returns the list of the recipes
+        that are available in the image [tool].
+        [tool] is binaryanalysisplatform/bap-toolkit by default *)
+    val list : ?tool:tool -> unit -> t list
 
     (** [name recipe] returns the name of the recipe  *)
     val name : t -> string
@@ -76,10 +98,10 @@ module Std : sig
     (** [description recipe]returns the description of the recipe *)
     val description : t -> string
 
-    (** [run ~image ~tag path recipe] runs the recipe.
+    (** [run ~tool ~image ~tag path recipe] runs the recipe.
       if [image] and/or [tag] is set then [path] is considered
       relatively to the [image], else to the host filesystem  *)
-    val run : ?image:string -> ?tag:string -> string -> t -> t
+    val run : ?tool:tool -> ?image:string -> ?tag:string -> string -> t -> t
 
     (** [time_taken recipe] returns a time that was spent for
       the last {run} command *)
@@ -262,25 +284,13 @@ module Std : sig
 
   end
 
-  module Read : sig
-
-    (** [incidents channel] read incidents from [channel]  *)
-    val incidents : In_channel.t -> incident list
-
-    (** [confirmations channel] returns a list of confirmed
-        incidents associated with the name of artifact *)
-    val confirmations :
-      In_channel.t -> (string * confirmation list) list
-
-  end
-
   module View : sig
 
     type col =
       | Path of int (* deep  *)
       | Name
       | Addr
-      | Locs
+      | Locations
 
     type info =
       | Web of string
@@ -294,13 +304,28 @@ module Std : sig
     val name : t -> incident_kind -> string
     val web  : t -> incident_kind -> string option
     val data : t -> incident -> string list
+    val of_file : string -> t
+
+  end
+
+  type view = View.t
+
+  module Read : sig
+
+    (** [incidents channel] read incidents from [channel]  *)
+    val incidents : In_channel.t -> incident list
+
+    (** [confirmations channel] returns a list of confirmed
+        incidents associated with the name of artifact *)
+    val confirmations :
+      In_channel.t -> (string * confirmation list) list
 
   end
 
   module Template : sig
 
     (** [render view artifacts] retutns the html report  *)
-    val render : View.t -> artifact list -> string
+    val render : view -> artifact list -> string
   end
 
 end

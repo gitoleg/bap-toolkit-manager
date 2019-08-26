@@ -1,5 +1,6 @@
 open Core_kernel
 open Bap_report.Std
+open Bap_report_options
 
 module Bap_artifact = struct
   let image = "binaryanalysisplatform/bap-artifacts"
@@ -8,10 +9,10 @@ module Bap_artifact = struct
     | Local
     | Image
 
-  let run_recipe a kind r =
+  let run_recipe tool a kind r =
     match kind with
-    | Local -> Recipe.run (Artifact.name a) r
-    | Image ->  Recipe.run ~image ~tag:(Artifact.name a) "/artifact" r
+    | Local -> Recipe.run ~tool (Artifact.name a) r
+    | Image ->  Recipe.run ~tool ~image ~tag:(Artifact.name a) "/artifact" r
 
   let can't_find tag reason =
     eprintf "can't find %s: %s\n" tag reason
@@ -52,8 +53,6 @@ let check_diff xs ys =
   List.fold xs ~init:[] ~f:(fun ac c ->
       if List.mem ys c ~equal:check_equal then ac
       else c :: ac)
-
-let arti_checks a = Artifact.checks a
 
 module Render = struct
 
@@ -122,16 +121,16 @@ let confirm confirmations arti kinds =
 
 
 
-let run_artifact confirmed arti kind recipe =
+let run_artifact tool confirmed arti kind recipe =
   printf "running %s %s\n%!" (Artifact.name arti) (Recipe.name recipe);
-  let checks = arti_checks arti in
-  let recipe = Bap_artifact.run_recipe arti kind recipe in
+  let checks = Artifact.checks arti in
+  let recipe = Bap_artifact.run_recipe tool arti kind recipe in
   let time = Recipe.time_taken recipe in
   let incs = "incidents" in
   if Sys.file_exists incs then
     let incs = In_channel.with_file incs ~f:Read.incidents in
     let arti = List.fold incs ~init:arti ~f:(fun a i -> Artifact.update a i Undecided) in
-    let checks = check_diff (arti_checks arti) checks in
+    let checks = check_diff (Artifact.checks arti) checks in
     let arti = update_time arti checks time  in
     confirm confirmed arti checks
   else arti
@@ -147,13 +146,13 @@ let recipes_of_names names =
     List.filter recipes
       ~f:(fun r -> List.mem names (Recipe.name r) ~equal:String.equal)
 
-let run render confirmed name recipes =
+let run tool render confirmed name recipes =
   let recipes = recipes_of_names recipes in
   match Render.get render name with
   | None -> render
   | Some (kind,arti) ->
     List.fold ~init:(render,arti) recipes ~f:(fun (render,arti) reci ->
-        let arti = run_artifact confirmed arti kind reci in
+        let arti = run_artifact tool confirmed arti kind reci in
         let render = Render.update render (kind,arti) in
         Render.run render;
         render,arti) |> fst
@@ -161,7 +160,7 @@ let run render confirmed name recipes =
 let default_view = View.create ()
 
 
-let run_artifacts ?(view=default_view) confirmed out artis recipes =
+let run_artifacts tool ?(view=default_view) confirmed out artis recipes =
   let render =
     List.fold artis
       ~init:(Render.create view out) ~f:(fun r name ->
@@ -172,7 +171,7 @@ let run_artifacts ?(view=default_view) confirmed out artis recipes =
           | Some a -> Render.update r a) in
   ignore @@
   List.fold artis
-    ~init:render ~f:(fun render name -> run render confirmed name recipes)
+    ~init:render ~f:(fun render name -> run tool render confirmed name recipes)
 
 let parse_path = function
   | [Sexp.Atom x] -> Some x
@@ -199,7 +198,7 @@ let read_schedule acc path =
     In_channel.with_file path ~f:Sexp.input_sexps in
   read [] sexps |> List.rev
 
-let run_schedule ?(view=default_view) confirmed out path =
+let run_schedule tool ?(view=default_view) confirmed out path =
   let acts = read_schedule [] path  in
   let render =
     List.fold acts
@@ -211,15 +210,16 @@ let run_schedule ?(view=default_view) confirmed out path =
   List.fold acts
     ~init:render
     ~f:(fun render (name,recipes) ->
-      run render confirmed name recipes)
+      run tool render confirmed name recipes)
 
-let check_toolkit () =
-  let tool = "binaryanalysisplatform/bap-toolkit" in
-  match Docker.get_image tool with
+let check_toolkit tool =
+  let tag = Tool.tag tool in
+  let image = Tool.name tool in
+  match Docker.get_image ?tag image with
   | Ok () -> ()
   | Error _ ->
-    eprintf "can't detect/pull bap-toolkit, exiting ... ";
-    exit 1
+     eprintf "can't detect/pull bap-toolkit, exiting ... ";
+     exit 1
 
 let of_incidents_file ?(view=default_view) output filename =
   let incidents = In_channel.with_file filename ~f:Read.incidents in
@@ -230,7 +230,6 @@ let of_incidents_file ?(view=default_view) output filename =
       Out_channel.output_string ch @@
         Template.render view [artifact])
 
-
 module O = struct
 
   type t = {
@@ -240,10 +239,12 @@ module O = struct
     confirms  : string option;
     output    : string;
     of_incs   : string option;
+    tool      : string option;
+    view      : string option;
   } [@@deriving fields]
 
 
-  let create a b c d e f = Fields.create a b c d e f
+  let create a b c d e f g h = Fields.create a b c d e f g h
 
 end
 
@@ -318,12 +319,21 @@ let of_incidents =
   let doc = "create a report from file with incidents" in
   Arg.(value & opt (some non_dir_file) None & info ["of-incidents"] ~doc)
 
+let tool =
+  let doc = "Use a tool other then binaryanalysisplatform/bap-toolkit.
+             Tags could be fed as expected, with ':' separator" in
+  Arg.(value & opt (some string) None & info ["tool"] ~doc)
+
+let view =
+  let doc = "use a view file with view for rendering incidents" in
+  Arg.(value & opt (some non_dir_file) None & info ["view"] ~doc)
+
 let is_specified opt ~default =
   Cmdliner.Term.eval_peek_opts opt |>
   fst |> Option.value ~default
 
-let print_recipes_and_exit () =
-  let recipes = Recipe.list ()  in
+let print_recipes_and_exit tool =
+  let recipes = Recipe.list ~tool ()  in
   List.iter recipes ~f:(fun r ->
       printf "%-32s %s\n" (Recipe.name r) (Recipe.description r));
   exit 0
@@ -335,17 +345,27 @@ let print_artifacts_and_exit () =
 
 let main o print_recipes print_artifacts =
   let open O in
-  check_toolkit ();
-  if print_recipes then print_recipes_and_exit ();
-  if print_artifacts then
-    print_artifacts_and_exit ();
+  let tool = match o.tool with
+    | None -> Tool.default
+    | Some name ->
+       match Tool.of_string name with
+       | Ok tool -> tool
+       | Error er ->
+          eprintf "%s\n" @@ Error.to_string_hum er;
+          exit 1 in
+  check_toolkit tool;
+  if print_recipes   then print_recipes_and_exit tool;
+  if print_artifacts then print_artifacts_and_exit ();
   let confirmed = match o.confirms with
     | None -> Map.empty (module String)
     | Some path -> read_confirmations path in
+  let view = match o.view with
+    | None -> None
+    | Some f -> Some (View.of_file f) in
   match o.schedule, o.of_incs with
-  | Some sch, _ -> run_schedule confirmed o.output sch
-  | _, Some file -> of_incidents_file o.output file
-  | _ -> run_artifacts confirmed o.output o.artifacts o.recipes
+  | Some sch, _ -> run_schedule ?view tool confirmed o.output sch
+  | _, Some file -> of_incidents_file ?view o.output file
+  | _ -> run_artifacts ?view tool confirmed o.output o.artifacts o.recipes
 
 let o =
   Term.(const O.create
@@ -354,14 +374,16 @@ let o =
         $recipes
         $confirms
         $output
-        $of_incidents)
+        $of_incidents
+        $tool
+        $view)
 
 let _ = Term.eval (Term.(const main $o $list_recipes $list_artifacts), info)
 
 (*
+TODO: install view file somewhere ?
 TODO: there is a bug when in infering a size of an artifact
-TODO: check conirmations!! Confirmed should be False_neg if absent!
-TODO: remove incidents file on exit ??
+TODO: remove incidents file on exit
 TODO: find a way to limit time?
 TODO: add something like a dump to (sexp?) file to render later
 *)
