@@ -110,8 +110,9 @@ module Make(M : Monad.S) = struct
          | Some m -> List.take m.stack 5 |> List.map ~f:snd in
        match List.filter_map locs ~f:(location_addr s.hist) with
        | [] -> !! ()
-       | (addr :: _) as locs ->
-          let inc = Incident.create kind addr ~path ~locs in
+       | addr :: prev ->
+          let locs = Locations.create ~prev addr in
+          let inc = Incident.create ~path locs kind in
           S.update (fun s -> {s with incs = inc :: s.incs})
 
   let incident_location (id,addrs) =
@@ -162,8 +163,10 @@ module Main = Make(Monad.Ident)
 
 module Data_format = struct
 
+  let addrs inc = Locations.addrs (Incident.locations inc)
+
   let in_function s inc =
-    match Incident.locations inc with
+    match addrs inc with
     | [] -> None
     | a :: _ ->
        match Map.find s.syms a with
@@ -171,12 +174,12 @@ module Data_format = struct
        | _ ->  None
 
   let incident_locations s inc =
-    match Incident.locations inc with
+    match addrs inc with
     | [] -> None
     | inc :: locs -> Some (Locations (inc, locs))
 
   let path s inc =
-    match Incident.locations inc with
+    match addrs inc with
     | [] -> None
     | a :: _ ->
        match Map.find s.calls a with

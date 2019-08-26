@@ -320,7 +320,7 @@ let render_data view data =
 
 
 let render_checkname view arti kind =
-  let id = sprintf "%s+%s" arti (Incident.string_of_kind kind) in
+  let id = sprintf "%s+%s" arti (Incident_kind.to_string kind) in
   sprintf "<b id=\"%s\">%s</b>" id (string_of_check view kind)
 
 let total_of_stat s = s.confirmed + s.false_pos + s.false_neg + s.undecided

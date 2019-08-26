@@ -16,6 +16,7 @@ type t
 
 val create : unit -> t
 
+
 val update : t -> incident_kind -> info -> unit
 
 val name : t -> incident_kind -> string

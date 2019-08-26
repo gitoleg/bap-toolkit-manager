@@ -31,7 +31,7 @@ let of_sexp s = match s with
   | List (Atom "incident-location" :: List [Atom loc_id; List points] :: _)  ->
     Incident_location (loc_id, trace_of_sexps points) |> some
   | List (Atom "incident" :: List (Atom name :: locs) :: _) ->
-     Incident (Incident.kind_of_string name, locs_of_sexps locs) |> some
+     Incident (Incident_kind.of_string name, locs_of_sexps locs) |> some
   | List (Atom "machine-switch" :: List [Atom from; Atom to_ ] :: _ ) ->
     Switch (from,to_) |> some
   | List (Atom "machine-fork" :: List [Atom from; Atom to_ ] :: _ ) ->
@@ -64,14 +64,17 @@ let try_sexp f s = Option.try_with (fun () -> f s)
 let read_confirmations ch =
   let locs_of_sexp xs =
     let locs = List.map ~f:string_of_sexp xs in
-    List.map ~f:Addr.of_string locs in
+    let addrs = List.map ~f:Addr.of_string locs in
+    match addrs with
+    | [] -> None
+    | a :: prev -> Some (Locations.create ~prev a) in
   let rec confs_of_sexps acc = function
     | [] -> acc
     | List (conf :: inc_kind :: locs) :: confs ->
        let x =
          Option.(try_sexp confirmation_kind_of_sexp conf >>= fun conf ->
                  try_sexp incident_kind_of_sexp inc_kind >>= fun kind ->
-                 let locs = locs_of_sexp locs in
+                 locs_of_sexp locs >>= fun locs ->
                  some @@ Confirmation.create conf kind locs) in
        let acc = match x with
          | None -> acc

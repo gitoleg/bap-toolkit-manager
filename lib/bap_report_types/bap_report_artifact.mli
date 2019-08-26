@@ -4,7 +4,7 @@ type t
 
 type incident = Bap_report_incident.t
 type incident_kind = Bap_report_incident.kind
-
+type incident_id = Bap_report_incident.id
 
 val create : ?size:int -> string -> t
 
@@ -23,3 +23,5 @@ val time_hum : t -> incident_kind -> string option
 val with_time : t -> incident_kind -> float -> t
 
 val summary : t -> incident_kind -> stat
+
+val find : t -> incident_id -> (incident * status) option

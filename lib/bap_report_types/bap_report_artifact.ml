@@ -2,27 +2,18 @@ open Core_kernel
 open Bap_report_common
 
 module Incident = Bap_report_incident
+module Kind = Incident.Kind
+module Id = Incident.Id
+
+
 type incident = Incident.t
 type incident_kind = Bap_report_incident.kind  [@@deriving bin_io, compare, sexp]
-
-module Kind = struct
-  module Cmp = struct
-    type t = incident_kind [@@deriving bin_io, compare, sexp]
-    include Comparator.Make(struct
-        type nonrec t = t [@@deriving bin_io, compare, sexp]
-      end)
-  end
-  include Cmp
-
-  module Map = Map.Make(Cmp)
-  module Set = Set.Make(Cmp)
-
-end
+type incident_id = Bap_report_incident.id  [@@deriving bin_io, compare, sexp]
 
 type t = {
   name : string;
   size : int option;
-  data : status Incident.Map.t Kind.Map.t;
+  data : (incident * status) Id.Map.t Kind.Map.t;
   time : float Kind.Map.t;
 }
 
@@ -66,15 +57,16 @@ let checks t = Map.to_alist t.data |> List.map ~f:fst
 
 let update t incident status =
   let kind = Incident.kind incident in
+  let id = Incident.id incident in
   {t with
    data =
      Map.update t.data kind ~f:(function
-         | None -> Incident.Map.singleton incident status
+         | None -> Id.Map.singleton id (incident,status)
          | Some res ->
-            Map.update res incident ~f:(function
-               | None -> status
-               | Some status' when status' = Undecided -> status
-               | Some status' -> status'))}
+            Map.update res id ~f:(function
+               | None -> incident,status
+               | Some (inc,status') when status' = Undecided -> inc,status
+               | Some x -> x))}
 
 let find_result t kind =
   match Map.find t.data kind with
@@ -97,7 +89,7 @@ let summary t kind =
   | Some x ->
     let false_pos,false_neg,confirmed,undecided =
       Map.fold x ~init:(0,0,0,0)
-        ~f:(fun ~key:_ ~data:status (fp,fn,cn,un) ->
+        ~f:(fun ~key:_ ~data:(_,status) (fp,fn,cn,un) ->
             match status with
             | False_pos -> fp + 1, fn, cn, un
             | False_neg -> fp, fn + 1, cn, un
@@ -108,9 +100,16 @@ let summary t kind =
 let incidents ?kind t =
   match kind with
   | None ->
-     let incs = Map.data t.data |> List.map ~f:Map.to_alist in
+     let incs = Map.data t.data |> List.map ~f:Map.data in
      List.concat incs
   | Some kind ->
      match Map.find t.data kind with
      | None -> []
-     | Some incs -> Map.to_alist incs
+     | Some incs -> Map.data incs
+
+
+let find t id =
+  let kind = Id.kind id in
+  match Map.find t.data kind with
+  | None -> None
+  | Some incs -> Map.find incs id

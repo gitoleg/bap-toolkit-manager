@@ -36,6 +36,28 @@ module Std : sig
   end
 
   type recipe
+  type artifact
+  type addr [@@deriving bin_io,compare,sexp]
+
+  type status =
+    | Confirmed
+    | False_pos
+    | False_neg
+    | Undecided
+   [@@deriving sexp]
+
+  type stat = {
+      false_pos : int;
+      false_neg : int;
+      confirmed : int;
+      undecided : int;
+   }[@@deriving sexp]
+
+  type locations     [@@deriving bin_io, compare, sexp]
+  type incident      [@@deriving bin_io, compare, sexp]
+  type incident_kind [@@deriving bin_io, compare, sexp]
+  type incident_id   [@@deriving bin_io, compare, sexp]
+  type confirmation  [@@deriving bin_io, compare, sexp]
 
   module Recipe : sig
 
@@ -65,41 +87,59 @@ module Std : sig
 
   end
 
-  (** [size ?image ?tag path] returns the size of the file at [path].
+  module Size : sig
+
+   (** [get ?image ?tag path] returns the size of the file at [path].
       if [image] and/or [tag] is set then [path] is considered
       relatively to the [image], else to the host filesystem*)
-  val size : ?image:string -> ?tag:string -> string -> int option
+    val get : ?image:string -> ?tag:string -> string -> int option
 
-  type check =
-    | Unused_return_value
-    | Null_ptr_deref
-    | Forbidden_function
-    | Complex_function
-    | Non_structural_cfg
-    | Recursive_function
-    | Hardcoded_socket_address
-    | Memcheck_double_release
-    | Memcheck_out_of_bound
-    | Memcheck_use_after_release
-    | Untrusted_argument
-  [@@deriving bin_io, compare, sexp]
+  end
 
-  type status =
-    | Confirmed
-    | False_pos
-    | False_neg
-    | Undecided
-   [@@deriving sexp]
+  module Addr : sig
+    type t = addr [@@deriving bin_io,compare,sexp]
 
-  type stat = {
-      false_pos : int;
-      false_neg : int;
-      confirmed : int;
-      undecided : int;
-   }[@@deriving sexp]
+    val of_string : string -> t
+    val to_string : t -> string
+
+    include Identifiable.S   with type t := t
+  end
+
+  module Locations : sig
+
+    type t = locations [@@deriving bin_io, compare, sexp]
+
+    val create : ?prev : addr list -> addr -> t
+    val addrs : t -> addr list
+
+    module Map : Map.S with type Key.t = t
+    module Set : Set.S with type Elt.t = t
 
 
-  type incident [@@deriving bin_io, compare, sexp]
+  end
+
+  module Incident_kind : sig
+
+    type t = incident_kind  [@@deriving bin_io, compare, sexp]
+
+    val of_string : string -> t
+    val to_string : t -> string
+
+    module Map : Map.S with type Key.t = t
+    module Set : Set.S with type Elt.t = t
+  end
+
+  module Incident_id : sig
+
+    type t = incident_id  [@@deriving bin_io, compare, sexp]
+
+    val create : incident_kind -> locations -> t
+
+    module Map : Map.S with type Key.t = t
+    module Set : Set.S with type Elt.t = t
+
+  end
+
 
   (* TODO: document it and don't forget to say that
      locations in [create] are not the same as
@@ -108,23 +148,20 @@ module Std : sig
   module Incident : sig
     type t = incident [@@deriving bin_io, compare, sexp]
 
-    val create :
-      ?trace:string list -> ?machine:string -> ?data:string list -> check -> string list -> t
+    val create : ?path:string list -> locations -> incident_kind -> t
 
-    val add_data : t -> string list -> t
+    val of_id : incident_id -> t
 
-    val check : t -> check
-    val trace : t -> string list
-    val locations : t -> string list
-    val machine : t -> string option
-    val data : t -> string list
+    val addr : t -> addr
+    val locations : t -> locations
+    val path : t -> string list
+    val kind : t -> incident_kind
+    val id   : t -> incident_id
 
     module Map : Map.S with type Key.t = t
     module Set : Set.S with type Elt.t = t
 
   end
-
-  type artifact
 
   module Artifact : sig
 
@@ -140,11 +177,11 @@ module Std : sig
     (** [incidents ~check artifact] returns the list of incidents
         that were happen with [artifact] along with the status.
         If [check] is set then returns only incident for the given [check] *)
-    val incidents : ?check : check -> t -> (incident * status) list
+    val incidents : ?kind : incident_kind -> t -> (incident * status) list
 
     (** [checks artifact] returns all the checks that were run
         against [artifact] *)
-    val checks : t -> check list
+    val checks : t -> incident_kind list
 
     (** [name artifact] returns a name of the [artifact] *)
     val name   : t -> string
@@ -161,18 +198,67 @@ module Std : sig
 
     (** [time artifact check] returns a time taken to run
         [check] against [artifact] in seconds *)
-    val time : t -> check -> float option
+    val time : t -> incident_kind -> float option
 
     (** [time_hum artifact check] returns a time taken to run
         [check] against [artifact] in human readable
         format *)
-    val time_hum : t -> check -> string option
+    val time_hum : t -> incident_kind -> string option
 
     (** [with_time artifact check time] updates time *)
-    val with_time : t -> check -> float -> t
+    val with_time : t -> incident_kind -> float -> t
 
     (** [summary artifact check] returns a summary for the given [check] *)
-    val summary : t -> check -> stat
+    val summary : t -> incident_kind -> stat
+
+    (** [find artifact id] returns an incident with [id]
+        along with its status, if any found *)
+    val find : t -> incident_id -> (incident * status) option
+
+  end
+
+
+  (** Confirmation is a expected incident and it could be
+      either of two kinds:
+
+    - must - such one which MUST come up during the analysis
+      and therefore an absence of such incindent is False negative,
+      and a presence is a Confirmed incident
+
+    - may - such one which MAY come up during the analysis.
+      and therefore an absence of such incindent is not a mistake,
+      and a presence is False positive.  *)
+  module Confirmation : sig
+
+    type t = confirmation [@@deriving sexp,compare,bin_io]
+
+    type kind [@@deriving sexp,compare,bin_io]
+
+    val must : kind
+    val may  : kind
+
+    (** [create kind incident_kind locations]
+        creates a confirmation of [kind] for incidents of
+        [incident_kind] and [locations]. Note, that locations
+        are unambigously define an incident of [incident_kind],
+        and will be use to confirm incidents *)
+    val create : kind -> incident_kind -> locations -> t
+
+    val id : t -> incident_id
+
+
+    val locations : t -> locations
+    val incident_kind : t -> incident_kind
+    val confirmation : t -> kind
+
+    val is : kind -> t -> bool
+
+    (** [validate conf status] - for a given
+        confirmation and incident status returns
+        a confirmed status of the incident. None
+        for [status] means that incident didn't
+        happen during the analysis. *)
+    val validate : t -> status option -> status
 
   end
 
@@ -184,14 +270,37 @@ module Std : sig
     (** [confirmations channel] returns a list of confirmed
         incidents associated with the name of artifact *)
     val confirmations :
-      In_channel.t -> (string * (incident * status) list) list
+      In_channel.t -> (string * confirmation list) list
+
+  end
+
+  module View : sig
+
+    type col =
+      | Path of int (* deep  *)
+      | Name
+      | Addr
+      | Locs
+
+    type info =
+      | Web of string
+      | Tab of col list
+      | Alias of string
+
+    type t
+
+    val create : unit -> t
+    val update : t -> incident_kind -> info -> unit
+    val name : t -> incident_kind -> string
+    val web  : t -> incident_kind -> string option
+    val data : t -> incident -> string list
 
   end
 
   module Template : sig
 
-    (** [render artifacts] retutns the html report  *)
-    val render : artifact list -> string
+    (** [render view artifacts] retutns the html report  *)
+    val render : View.t -> artifact list -> string
   end
 
 end

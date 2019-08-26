@@ -38,15 +38,15 @@ module Bap_artifact = struct
     match kind_of_name name with
     | None -> None
     | Some Local ->
-      let size = size name in
+      let size = Size.get name in
       Some (Local, Artifact.create ?size name)
     | Some Image ->
-      let size = size ~image ~tag:name "/artifact" in
+      let size = Size.get ~image ~tag:name "/artifact" in
       Some (Image, Artifact.create ?size name)
 
 end
 
-let check_equal x y = compare_check x y = 0
+let check_equal x y = compare_incident_kind x y = 0
 
 let check_diff xs ys =
   List.fold xs ~init:[] ~f:(fun ac c ->
@@ -57,19 +57,28 @@ let arti_checks a = Artifact.checks a
 
 module Render = struct
 
-  type t = (Bap_artifact.kind * artifact) String.Map.t * string
+  type t = {
+      view : View.t;
+      arts : (Bap_artifact.kind * artifact) String.Map.t;
+      outp : string;
+    }
 
-  let create file = Map.empty (module String), file
+  let create view output = {
+      view;
+      arts = Map.empty (module String);
+      outp = output;
+    }
 
-  let update (t, out) (kind,arti) =
-    Map.set t (Artifact.name arti) (kind,arti), out
+  let update t (kind,arti) =
+    {t with arts =
+      Map.set t.arts (Artifact.name arti) (kind,arti) }
 
-  let get (t,_) name = Map.find t name
+  let get t name = Map.find t.arts name
 
-  let run (t,out) =
-    let artis = Map.data t |> List.map ~f:snd in
-    let doc = Template.render artis in
-    Out_channel.with_file out
+  let run t =
+    let artis = Map.data t.arts |> List.map ~f:snd in
+    let doc = Template.render t.view artis in
+    Out_channel.with_file t.outp
       ~f:(fun ch -> Out_channel.output_string ch doc)
 
 end
@@ -79,37 +88,39 @@ let update_time arti checks time =
     ~f:(fun arti c -> Artifact.with_time arti c time)
 
 let map_of_alist ~init xs =
-  List.fold ~init xs ~f:(fun m (key,value) -> Map.set m key value)
+  List.fold ~init xs ~f:(fun m conf -> Map.set m (Confirmation.id conf) conf)
 
 let read_confirmations path =
-  let incs = In_channel.with_file path ~f:Read.confirmations in
-  List.fold incs ~init:(Map.empty (module String))
-    ~f:(fun m (name,incs) ->
+  let confs = In_channel.with_file path ~f:Read.confirmations in
+  List.fold confs ~init:(Map.empty (module String))
+    ~f:(fun m (name,confs) ->
         Map.update m name ~f:(function
-            | None -> map_of_alist ~init:Incident.Map.empty incs
-            | Some incs' -> map_of_alist ~init:incs' incs))
+            | None -> map_of_alist ~init:Incident_id.Map.empty confs
+            | Some confs' -> map_of_alist ~init:confs' confs))
 
 let check_mem checks c =
-  List.mem checks c ~equal:(fun c c' -> compare_check c c' = 0)
+  List.mem checks c ~equal:(fun c c' -> Incident_kind.compare c c' = 0)
 
-let confirm confirmations arti checks =
+let confirm confirmations arti kinds =
   match Map.find confirmations (Artifact.name arti) with
   | None -> arti
   | Some confirmed ->
-    let arti =
-      List.fold ~init:arti checks
-        ~f:(fun arti check ->
-            let incs = Artifact.incidents ~check arti in
-            List.fold incs ~init:arti ~f:(fun arti (inc,_) ->
-                match Map.find confirmed inc with
-                | None -> arti
-                | Some status -> Artifact.update arti inc status)) in
-    Map.fold confirmed ~init:arti
-      ~f:(fun ~key:inc ~data:status arti ->
-          match status with
-          | False_neg when check_mem checks (Incident.check inc) ->
+     Map.fold confirmed ~init:arti ~f:(fun ~key:id ~data:conf arti ->
+         match Artifact.find arti id with
+         | Some (inc,st) ->
+            let status = Confirmation.validate conf (Some st) in
             Artifact.update arti inc status
-          | _ -> arti)
+
+         | None ->
+            match Confirmation.validate conf None with
+            | False_neg as status ->
+               let inc = Incident.create
+                           (Confirmation.locations conf)
+                           (Confirmation.incident_kind conf)  in
+               Artifact.update arti inc  status
+            | _ -> arti)
+
+
 
 let run_artifact confirmed arti kind recipe =
   printf "running %s %s\n%!" (Artifact.name arti) (Recipe.name recipe);
@@ -147,10 +158,13 @@ let run render confirmed name recipes =
         Render.run render;
         render,arti) |> fst
 
-let run_artifacts confirmed out artis recipes =
+let default_view = View.create ()
+
+
+let run_artifacts ?(view=default_view) confirmed out artis recipes =
   let render =
     List.fold artis
-      ~init:(Render.create out) ~f:(fun r name ->
+      ~init:(Render.create view out) ~f:(fun r name ->
           match Bap_artifact.find name with
           | None ->
             eprintf "didn't find artifact %s, skipping ... \n" name;
@@ -185,11 +199,11 @@ let read_schedule acc path =
     In_channel.with_file path ~f:Sexp.input_sexps in
   read [] sexps |> List.rev
 
-let run_schedule confirmed out path =
+let run_schedule ?(view=default_view) confirmed out path =
   let acts = read_schedule [] path  in
   let render =
     List.fold acts
-      ~init:(Render.create out) ~f:(fun r (name,recipes) ->
+      ~init:(Render.create view out) ~f:(fun r (name,recipes) ->
           match Bap_artifact.find name with
           | None -> r
           | Some a -> Render.update r a) in
@@ -207,14 +221,14 @@ let check_toolkit () =
     eprintf "can't detect/pull bap-toolkit, exiting ... ";
     exit 1
 
-let of_incidents_file output filename =
+let of_incidents_file ?(view=default_view) output filename =
   let incidents = In_channel.with_file filename ~f:Read.incidents in
   let artifact = Artifact.create filename in
   let artifact = List.fold incidents ~init:artifact ~f:(fun a i ->
       Artifact.update a i Undecided) in
   Out_channel.with_file output ~f:(fun ch ->
       Out_channel.output_string ch @@
-        Template.render [artifact])
+        Template.render view [artifact])
 
 
 module O = struct

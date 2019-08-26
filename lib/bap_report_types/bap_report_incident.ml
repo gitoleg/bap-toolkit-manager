@@ -1,33 +1,89 @@
 open Core_kernel
 open Bap_report_common
 
-type kind = string [@@deriving bin_io, compare, sexp]
+module Kind = struct
+  type t = string [@@deriving bin_io, compare, sexp]
+  let of_string x = x
+  let to_string x = x
 
-type locs = addr list [@@deriving bin_io, compare, sexp]
+  module Map = String.Map
+  module Set = String.Set
+end
+
+module Locations = struct
+  type t = addr list [@@deriving bin_io, compare, sexp]
+
+  let create ?(prev=[]) addr = addr :: prev
+  let addrs x = x
+  let addr xs = List.hd_exn xs
+
+  module T = struct
+    type nonrec t = t [@@deriving sexp,compare]
+  end
+
+  module S = struct
+    include T
+    include Comparator.Make(T)
+  end
+
+  module Map = Map.Make(S)
+  module Set = Set.Make(S)
+end
+
+type kind = Kind.t [@@deriving bin_io, compare, sexp]
+type locations = Locations.t [@@deriving bin_io, compare, sexp]
+
+
+module Id = struct
+
+  type t = {
+      locs : locations;
+      kind : kind;
+    } [@@deriving bin_io, compare, sexp]
+
+  let create kind locs = {kind;locs}
+  let locations t = t.locs
+  let kind t = t.kind
+
+  module T = struct
+    type nonrec t = t [@@deriving sexp,compare]
+  end
+
+  module S = struct
+    include T
+    include Comparator.Make(T)
+  end
+
+  module Map = Map.Make(S)
+  module Set = Set.Make(S)
+
+end
+
+type id = Id.t [@@deriving bin_io, compare, sexp]
 
 type t = {
-    kind : kind;
-    addr : addr;
-    locs : locs;
+    id   : id;
     path : string list;
 } [@@deriving bin_io, sexp]
 
 
-let create ?(path=[]) ?(locs=[]) kind addr =
-  {kind; addr; locs; path}
+let create ?(path=[]) locs kind =
+  {id = Id.create kind locs; path}
 
-let locations t = t.locs
+let locations t = t.id.locs
 let path t = t.path
-let kind t = t.kind
-let addr t = t.addr
+let kind t = t.id.kind
+let addr t = Locations.addr t.id.locs
 
-let kind_of_string x = x
-let string_of_kind x = x
+let id t = t.id
+
+let of_id id = create (Id.locations id) (Id.kind id)
+
 
 let compare t t' =
-  let r = compare_kind t.kind t'.kind in
+  let r = Kind.compare t.id.kind t'.id.kind in
   if r <> 0 then r
-  else compare_locs t.locs t'.locs
+  else Locations.compare t.id.locs t'.id.locs
 
 module Map = Map.Make(struct
     type nonrec t = t [@@deriving sexp]
