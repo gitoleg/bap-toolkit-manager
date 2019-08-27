@@ -381,6 +381,7 @@ let o =
 let _ = Term.eval (Term.(const main $o $list_recipes $list_artifacts), info)
 
 (*
+TODO: document everything
 TODO: install view file somewhere ?
 TODO: there is a bug when in infering a size of an artifact
 TODO: remove incidents file on exit

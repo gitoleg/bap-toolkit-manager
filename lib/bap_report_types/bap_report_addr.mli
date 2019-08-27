@@ -1,7 +1,7 @@
 open Core_kernel
 
 
-type t [@@deriving bin_io,compare,sexp]
+type t [@@deriving bin_io,compare,hash,sexp]
 
 val of_string : string -> t
 val to_string : t -> string

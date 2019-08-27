@@ -6,7 +6,7 @@ open Bap_report_read_types
 module Parse = Bap_report_parse_incidents
 
 type machine = {
-  pid : string;
+  pid : machine_id;
   pc  : addr;
   stack : (addr * string) list;
   prev_pc : addr option;
@@ -64,6 +64,8 @@ module Make(M : Monad.S) = struct
 
   let (>>~) = opt
 
+  let last_n = 5
+
   let call name =
     S.get () >>= fun state ->
     machine >>~ fun m ->
@@ -73,7 +75,7 @@ module Make(M : Monad.S) = struct
          (* to prevent adding lisp calls on the stack  *)
          state.calls, m.stack
       | stack, Some prev_pc ->
-         let last_few = name :: (List.take stack 5 |> List.map ~f:snd) in
+         let last_few = name :: (List.take stack last_n |> List.map ~f:snd) in
          Map.set state.calls ~key:prev_pc ~data:last_few,
          (m.pc, name) :: stack
       | _ -> state.calls, m.stack in
@@ -88,12 +90,11 @@ module Make(M : Monad.S) = struct
       | (pc,name') :: stack' when name = name' ->
          let calls =
            if m.pc = pc then
-             (*  rewrite:
-                 for lisp calls, want be sure it is in calls:
+             (*  for lisp calls, want be sure it is in calls:
                  i.e. there wasn't pc-change event between
                  call  and call-return, therefore the
                  correct address of the can be infered like that *)
-             let last_few = name :: (List.take stack' 5 |> List.map ~f:snd) in
+             let last_few = name :: (List.take stack' last_n |> List.map ~f:snd) in
              Map.set s.calls ~key:pc ~data:last_few
            else s.calls in
          stack', calls
@@ -107,11 +108,14 @@ module Make(M : Monad.S) = struct
        machine >>= fun m ->
        let path = match m with
          | None -> []
-         | Some m -> List.take m.stack 5 |> List.map ~f:snd in
+         | Some m -> List.take m.stack last_n |> List.map ~f:snd in
        match List.filter_map locs ~f:(location_addr s.hist) with
        | [] -> !! ()
        | addr :: prev ->
           let locs = Locations.create ~prev addr in
+          let path = match path with
+            | [] -> List.filter_map ~f:ident [Map.find s.syms addr]
+            | _ -> path in
           let inc = Incident.create ~path locs kind in
           S.update (fun s -> {s with incs = inc :: s.incs})
 
@@ -170,7 +174,8 @@ module Data_format = struct
     | [] -> None
     | a :: _ ->
        match Map.find s.syms a with
-       | Some n -> Some (Name n)
+       | Some n ->
+          Some (Name n)
        | _ ->  None
 
   let incident_locations s inc =
@@ -185,6 +190,15 @@ module Data_format = struct
        match Map.find s.calls a with
        | None -> None
        | Some names -> Some (Path names)
+
+  let unused_return s inc =
+    let a = Incident.addr inc in
+    match Map.find s.calls a with
+       | Some (name :: prev :: _ )->
+          Some  [prev; name; Addr.to_string a]
+       | Some (name :: [])->
+          Some ["-----"; name; Addr.to_string a]
+       | _ -> None
 
 
   (* let symbol_name s inc =
@@ -220,11 +234,27 @@ module Data_format = struct
 end
 
 let read ch =
-  let empty = Map.empty (module String) in
   let fresh = {cur = None;
-               hist=empty;
+               hist=Map.empty (module Location_id);
                calls=Map.empty (module Addr);
                syms=Map.empty (module Addr);
-               machs=empty;incs=[]} in
+               machs=Map.empty (module Machine_id);
+               incs=[]} in
   let results = Monad.State.exec (Main.run ch) fresh in
+
+  let () =
+    List.iter results.incs ~f:(fun inc ->
+        printf "incident addr %s\n"
+          (Incident.addr inc |> Addr.to_string);
+        printf " locations: %s\n"
+          (Incident.locations inc |> Locations.addrs |>
+             List.map ~f:Addr.to_string |>
+             List.fold ~init:"" ~f:(sprintf "%s%s "));
+
+        match Data_format.unused_return results inc with
+        | None -> ()
+        | Some strs ->
+           printf "found for %s: %s\n"
+             (Addr.to_string (Incident.addr inc))
+             (List.fold strs ~init:"" ~f:(sprintf "%s%s "))) in
   results.incs

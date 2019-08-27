@@ -6,7 +6,7 @@ module Kind = Incident.Kind
 module Id = Incident.Id
 
 
-type incident = Incident.t
+type incident = Incident.t [@@deriving bin_io, compare, sexp]
 type incident_kind = Bap_report_incident.kind  [@@deriving bin_io, compare, sexp]
 type incident_id = Bap_report_incident.id  [@@deriving bin_io, compare, sexp]
 
@@ -15,7 +15,7 @@ type t = {
   size : int option;
   data : (incident * status) Id.Map.t Kind.Map.t;
   time : float Kind.Map.t;
-}
+} [@@deriving bin_io, compare, sexp]
 
 module Size = struct
 

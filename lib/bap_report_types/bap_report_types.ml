@@ -8,7 +8,7 @@ module Locations = Incident.Locations
 module Artifact = Bap_report_artifact
 module Confirmation = Bap_report_confirmation
 
-type artifact = Artifact.t
+type artifact = Artifact.t [@@deriving bin_io,compare,sexp]
 type incident = Incident.t [@@deriving bin_io,compare,sexp]
 type incident_kind = Incident.kind [@@deriving bin_io,compare,sexp]
 type confirmation = Confirmation.t [@@deriving bin_io,compare,sexp]

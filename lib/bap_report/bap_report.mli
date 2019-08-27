@@ -37,7 +37,7 @@ module Std : sig
 
   type tool
   type recipe
-  type artifact
+  type artifact [@@deriving bin_io, compare, sexp]
   type addr [@@deriving bin_io,compare,sexp]
 
   type status =
@@ -45,14 +45,14 @@ module Std : sig
     | False_pos
     | False_neg
     | Undecided
-   [@@deriving sexp]
+   [@@deriving bin_io, compare, sexp]
 
   type stat = {
       false_pos : int;
       false_neg : int;
       confirmed : int;
       undecided : int;
-   }[@@deriving sexp]
+   }[@@deriving bin_io, compare, sexp]
 
   type locations     [@@deriving bin_io, compare, sexp]
   type incident      [@@deriving bin_io, compare, sexp]
@@ -61,6 +61,7 @@ module Std : sig
   type confirmation  [@@deriving bin_io, compare, sexp]
 
 
+  (** Tool is a docker image that responsible for running recipes *)
   module Tool : sig
 
     type t = tool
@@ -134,10 +135,7 @@ module Std : sig
     val create : ?prev : addr list -> addr -> t
     val addrs : t -> addr list
 
-    module Map : Map.S with type Key.t = t
-    module Set : Set.S with type Elt.t = t
-
-
+    include Identifiable.S   with type t := t
   end
 
   module Incident_kind : sig
@@ -147,19 +145,15 @@ module Std : sig
     val of_string : string -> t
     val to_string : t -> string
 
-    module Map : Map.S with type Key.t = t
-    module Set : Set.S with type Elt.t = t
+    include Identifiable.S   with type t := t
   end
 
   module Incident_id : sig
-
     type t = incident_id  [@@deriving bin_io, compare, sexp]
 
     val create : incident_kind -> locations -> t
 
-    module Map : Map.S with type Key.t = t
-    module Set : Set.S with type Elt.t = t
-
+    include Identifiable.S   with type t := t
   end
 
 
@@ -180,9 +174,7 @@ module Std : sig
     val kind : t -> incident_kind
     val id   : t -> incident_id
 
-    module Map : Map.S with type Key.t = t
-    module Set : Set.S with type Elt.t = t
-
+    include Identifiable.S   with type t := t
   end
 
   module Artifact : sig

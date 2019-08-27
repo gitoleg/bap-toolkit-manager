@@ -49,6 +49,12 @@ let web t inc =
       | Web w -> Some w
       | _ -> None)
 
+let symbol inc =
+  match Incident.path inc with
+  | [] -> None
+  | a :: _ -> Some a
+
+
 let data t inc =
   let kind = Incident.kind inc in
   let cols = find_info t kind ~f:(function
@@ -61,7 +67,11 @@ let data t inc =
     List.fold cols ~init:[] ~f:(fun acc -> function
         | Path n ->
            (List.rev (List.take (Incident.path inc) n)) @ acc
-        | Name -> name t kind :: acc
+        | Name ->
+           let name = match symbol inc with
+             | None -> name t kind
+             | Some sym -> sym in
+           name :: acc
         | Addr -> Addr.to_string (Incident.addr inc) :: acc
         | Locations ->
            let addrs = Locations.addrs (Incident.locations inc) in

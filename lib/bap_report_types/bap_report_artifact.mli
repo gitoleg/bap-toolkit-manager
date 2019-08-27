@@ -1,6 +1,6 @@
 open Bap_report_common
 
-type t
+type t [@@deriving bin_io, compare, sexp]
 
 type incident = Bap_report_incident.t
 type incident_kind = Bap_report_incident.kind

@@ -8,8 +8,7 @@ module Kind : sig
   val of_string : string -> t
   val to_string : t -> string
 
-  module Map : Map.S with type Key.t = t
-  module Set : Set.S with type Elt.t = t
+  include Identifiable.S with type t := t
 end
 
 module Locations : sig
@@ -19,8 +18,7 @@ module Locations : sig
   val create : ?prev:addr list -> addr -> t
   val addrs : t -> addr list
 
-  module Map : Map.S with type Key.t = t
-  module Set : Set.S with type Elt.t = t
+  include Identifiable.S with type t := t
 end
 
 type locations = Locations.t [@@deriving bin_io, compare, sexp]
@@ -37,9 +35,7 @@ module Id : sig
   val locations : t -> locations
   val kind : t -> kind
 
-  module Map : Map.S with type Key.t = t
-  module Set : Set.S with type Elt.t = t
-
+  include Identifiable.S with type t := t
 end
 
 type id = Id.t  [@@deriving bin_io, compare, sexp]
@@ -56,5 +52,5 @@ val path : t -> string list
 val kind : t -> kind
 val id   : t -> Id.t
 
-module Map : Map.S with type Key.t = t
-module Set : Set.S with type Elt.t = t
+
+include Identifiable.S with type t := t

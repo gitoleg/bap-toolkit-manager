@@ -24,18 +24,18 @@ let trace_of_sexps xs =
 
 let locs_of_sexps xs =
   List.filter_map xs ~f:(function
-      | Atom s -> Some s
+      | Atom s -> Some (Location_id.of_string s)
       | _ -> None)
 
 let of_sexp s = match s with
-  | List (Atom "incident-location" :: List [Atom loc_id; List points] :: _)  ->
-    Incident_location (loc_id, trace_of_sexps points) |> some
+  | List (Atom "incident-location" :: List [Atom id; List points] :: _)  ->
+     Incident_location (Location_id.of_string id, trace_of_sexps points) |> some
   | List (Atom "incident" :: List (Atom name :: locs) :: _) ->
      Incident (Incident_kind.of_string name, locs_of_sexps locs) |> some
   | List (Atom "machine-switch" :: List [Atom from; Atom to_ ] :: _ ) ->
-    Switch (from,to_) |> some
+    Switch (Machine_id.of_string from, Machine_id.of_string to_) |> some
   | List (Atom "machine-fork" :: List [Atom from; Atom to_ ] :: _ ) ->
-    Fork (from,to_) |> some
+    Fork (Machine_id.of_string from, Machine_id.of_string to_) |> some
   | List (Atom "call" :: List (Atom name :: _) :: _ ) ->
     Call name |> some
   | List (Atom "call-return" :: List (Atom name :: _) :: _ ) ->

@@ -5,17 +5,17 @@ type status =
   | False_pos
   | False_neg
   | Undecided
-[@@deriving sexp]
+[@@deriving bin_io, compare, sexp]
 
 type stat = {
   false_pos : int;
   false_neg : int;
   confirmed : int;
   undecided : int;
-} [@@deriving sexp]
+} [@@deriving bin_io, compare, sexp]
 
 type result = string list
 [@@deriving bin_io,compare, sexp]
 
 module Addr = Bap_report_addr
-type addr = Addr.t [@@deriving bin_io,compare, sexp]
+type addr = Addr.t [@@deriving bin_io,compare, hash,sexp]
