@@ -387,4 +387,6 @@ TODO: there is a bug when in infering a size of an artifact
 TODO: remove incidents file on exit
 TODO: find a way to limit time?
 TODO: add something like a dump to (sexp?) file to render later
+TODO: add dump to database as bin_io of artifacts. here should be some
+      options: dump-db, update-db, render-db
 *)
