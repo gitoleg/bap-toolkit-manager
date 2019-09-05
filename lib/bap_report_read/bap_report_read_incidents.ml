@@ -66,6 +66,10 @@ module Make(M : Monad.S) = struct
 
   let last_n = 5
 
+
+  let string_of_addrs addrs =
+    String.concat ~sep:" " (List.map ~f:Addr.to_string addrs)
+
   let call name =
     S.get () >>= fun state ->
     machine >>~ fun m ->
@@ -117,7 +121,7 @@ module Make(M : Monad.S) = struct
       | None -> !! []
       | Some s -> !! [s] in
     let from_calls s =
-      !! (List.rev @@ Option.value ~default:[] (Map.find s.calls addr)) in
+      !! (Option.value ~default:[] (Map.find s.calls addr)) in
     let from_stack =
       machine >>= fun m ->
       match m with
@@ -133,6 +137,9 @@ module Make(M : Monad.S) = struct
   | None -> !! []
   | Some x -> !! x
 
+  let locs_to_str locs =
+    String.concat ~sep:" " @@
+      List.map locs  ~f:Addr.to_string
 
   let incident kind locs =
     let location_addr hist id = Option.(Map.find hist id >>= List.hd) in
@@ -194,9 +201,9 @@ module Main = Make(Monad.Ident)
 
 let read ch =
   let fresh = {cur = None;
-               hist=Map.empty (module Location_id);
+               hist =Map.empty (module Location_id);
                calls=Map.empty (module Addr);
-               syms=Map.empty (module Addr);
+               syms =Map.empty (module Addr);
                machs=Map.empty (module Machine_id);
                incs=[]} in
   let results = Monad.State.exec (Main.run ch) fresh in

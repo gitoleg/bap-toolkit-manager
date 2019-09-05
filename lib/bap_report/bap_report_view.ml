@@ -113,20 +113,19 @@ let info_of_str str =
     Sexp.of_string str |> info_of_sexp
   with _ -> None
 
+module Read = Bap_report_read.Helper
 
 let read ch =
   let t = create () in
-  let rec loop ()  =
-    match In_channel.input_line ch with
-    | None -> ()
-    | Some line when String.is_prefix ~prefix:"#" line -> loop ()
-    | Some s ->
-       match info_of_str s with
-       | None -> loop ()
+  let rec loop = function
+    | [] -> ()
+    | line :: lines ->
+       match info_of_str line with
+       | None -> loop lines
        | Some (kind,info) ->
           update t (Incident.Kind.of_string kind) info;
-          loop () in
-  loop ();
+          loop lines in
+  loop (Read.lines ~comments:"#" ch);
   t
 
 let of_file fname = In_channel.with_file fname ~f:read

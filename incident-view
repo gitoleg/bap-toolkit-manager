@@ -9,7 +9,7 @@
 (alias unused-return-value  "Unused return value")
 (alias null-ptr-deref       "Null pointer dereference")
 (alias forbidden-function   "Forbidden function")
-(alias complex-function     "Complex functino")
+(alias complex-function     "Complex function")
 (alias non-structural-cfg   "Non structural CFG")
 (alias recursive-function   "Recursive function")
 (alias hardcoded-socket-address "Hardcoded socket address")
@@ -29,7 +29,7 @@
 (web forbidden-function "https://raw.githubusercontent.com/BinaryAnalysisPlatform/bap-toolkit/master/forbidden-symbol/descr")
 (web value-was-used-before-check https://cwe.mitre.org/data/definitions/690.html)
 
-(tab unused-return-value (path 2) addr)
+(tab unused-return-value (path 1) addr)
 (tab null-ptr-deref name addr)
 (tab complex-function name)
 (tab non-structural-cfg name)

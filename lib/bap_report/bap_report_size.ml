@@ -3,10 +3,10 @@ open Bap_report_utils
 
 module Docker = Bap_report_docker
 
-let get ?image ?tag path =
+let get ?image path =
   let size = match image with
     | Some image ->
-       Docker.run ~image ?tag (sprintf "stat -c%%s %s" path)
+       Docker.run image (sprintf "stat -c%%s %s" path)
     | None -> cmd "stat -c%%s %s" path in
   match size with
   | None -> None
