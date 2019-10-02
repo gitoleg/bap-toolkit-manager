@@ -1,5 +1,6 @@
 open Core_kernel
 open Bap_report.Std
+open Bap_report_cmd_terms
 open Bap_report_options
 
 module Scheduled = Bap_report_scheduled
@@ -14,12 +15,14 @@ module Bap_artifact = struct
     | Local
     | Image
 
-  let run_recipe ?(verbose=true) tool arti kind limit r =
+  let run_recipe ctxt arti kind r  =
+    let run =
+      Job.run r ~verbose:ctxt.verbose ~tool:ctxt.tool ~limit:ctxt.limit in
     match kind with
-    | Local -> Job.run r ~verbose ~tool ~limit (Artifact.name arti)
+    | Local -> run (Artifact.name arti)
     | Image ->
       let image = with_tag (Artifact.name arti) in
-      Job.run r ~verbose ~tool ~image ~limit "/artifact"
+      run ~image "/artifact"
 
   let can't_find tag reason =
     eprintf "can't find %s: %s\n" tag reason
@@ -53,7 +56,6 @@ module Bap_artifact = struct
       let image = with_tag name in
       let size = Size.get ~image "/artifact" in
       Some (Image, Artifact.create ?size name)
-
 end
 
 module Runner = struct
@@ -99,13 +101,15 @@ let update_time arti checks time =
 let map_of_alist ~init xs =
   List.fold ~init xs ~f:(fun m conf -> Map.set m (Confirmation.id conf) conf)
 
-let read_confirmations path =
-  let confs = In_channel.with_file path ~f:Read.confirmations in
-  List.fold confs ~init:(Map.empty (module String))
-    ~f:(fun m (name,confs) ->
-        Map.update m name ~f:(function
-            | None -> map_of_alist ~init:Incident.Id.Map.empty confs
-            | Some confs' -> map_of_alist ~init:confs' confs))
+let read_confirmations = function
+  | None -> Map.empty (module String)
+  | Some path ->
+     let confs = In_channel.with_file path ~f:Read.confirmations in
+     List.fold confs ~init:(Map.empty (module String))
+       ~f:(fun m (name,confs) ->
+         Map.update m name ~f:(function
+             | None -> map_of_alist ~init:Incident.Id.Map.empty confs
+             | Some confs' -> map_of_alist ~init:confs' confs))
 
 let check_mem checks c =
   List.mem checks c ~equal:(fun c c' -> Incident.Kind.compare c c' = 0)
@@ -132,8 +136,8 @@ let confirm confirmations arti kinds =
               Artifact.update arti inc  status
             | _ -> arti)
 
-let print_bap_version tool =
-  match Docker.run tool "--version" with
+let print_bap_version ctxt =
+  match Docker.run ctxt.tool "--version" with
   | None -> ()
   | Some str -> printf "bap version: %s" str
 
@@ -145,13 +149,13 @@ let startup_time () =
   let t = gettimeofday () |> localtime in
   sprintf "%02d:%02d:%02d" t.tm_hour t.tm_min t.tm_sec
 
-let run_artifact verbose tool confirmed arti kind recipe limit =
+let run_artifact ctxt confirmed arti kind recipe =
   printf "started %s %s at %s\n%!"
     (Artifact.name arti)
     (Recipe.to_string recipe)
     (startup_time ());
   let checks = Artifact.checks arti in
-  let job = Bap_artifact.run_recipe ~verbose tool arti kind limit recipe in
+  let job = Bap_artifact.run_recipe ctxt arti kind recipe in
   print_errors job;
   match Job.incidents job with
   | [] -> arti
@@ -161,37 +165,17 @@ let run_artifact verbose tool confirmed arti kind recipe limit =
     let arti = update_time arti checks (Job.time job)  in
     confirm confirmed arti checks
 
-let need_all names =
-  let f {Scheduled.name} = String.lowercase name = "all" in
-  List.exists names ~f
-
-let recipes_of_names tool names =
-  let recipes = Recipe.list tool in
-  let find name =
-    List.find recipes ~f:(fun r -> String.equal (Recipe.name r) name) in
-  if need_all names then recipes
-  else
-    List.filter_map names
-      ~f:(fun {Scheduled.name;pars} ->
-          (match find name with
-           | None -> eprintf "can't find recipe %s\n" name; None
-           | Some r ->
-             List.fold pars ~init:r ~f:(fun r (name,value) ->
-                 Recipe.add_parameter r ~name ~value) |>
-             Option.some))
-
-let run verbose tool runner confirmed name recipes limit =
-  let recipes = recipes_of_names tool recipes in
+let run ctxt runner confirmed name recipes =
   match Runner.get runner name with
   | None -> runner
   | Some (kind,arti) ->
     List.fold ~init:(runner,arti) recipes ~f:(fun (runner,arti) reci ->
-        let arti = run_artifact verbose tool confirmed arti kind reci limit in
+        let arti = run_artifact ctxt confirmed arti kind reci in
         let runner = Runner.update runner (kind,arti) in
         Runner.run runner;
         runner,arti) |> fst
 
-let run_artifacts verbose tool runner confirmed artis recipes limit =
+let run_artifacts ctxt runner confirmed artis recipes =
   let runner =
     List.fold artis
       ~init:runner ~f:(fun r name ->
@@ -203,11 +187,11 @@ let run_artifacts verbose tool runner confirmed artis recipes limit =
   let runner =
     List.fold artis
       ~init:runner ~f:(fun runner name ->
-          run verbose tool runner confirmed name recipes limit) in
+          run ctxt runner confirmed name recipes) in
   Runner.artifacts runner
 
-let run_schedule verbose tool runner confirmed path limit =
-  let acts = Scheduled.of_file path  in
+let run_schedule ctxt runner confirmed path =
+  let acts = Scheduled.of_file ctxt.tool path  in
   let runner =
     List.fold acts
       ~init:runner ~f:(fun r {Scheduled.artifact;} ->
@@ -218,17 +202,8 @@ let run_schedule verbose tool runner confirmed path limit =
     List.fold acts
       ~init:runner
       ~f:(fun runner s ->
-          run verbose tool runner confirmed s.artifact s.recipes limit) in
+          run ctxt runner confirmed s.artifact s.recipes) in
   Runner.artifacts runner
-
-let check_toolkit tool =
-  let (>>=) = Or_error.(>>=) in
-  match Docker.Image.(of_string tool >>= fun tool -> get tool >>= fun () -> Ok tool) with
-  | Ok tool -> tool
-  | Error er ->
-    eprintf "can't detect/pull toolkit: %s, exiting ... \n"
-      (Error.to_string_hum er);
-    exit 1
 
 let of_incidents_file confirmations runner filename =
   let name = Filename.remove_extension filename in
@@ -240,35 +215,8 @@ let of_incidents_file confirmations runner filename =
   let x = Runner.update runner (Local, artifact) in
   Runner.run x
 
-module O = struct
-
-  type t = {
-    schedule   : string option;
-    artifacts  : string list;
-    recipes    : Scheduled.requested_recipe list;
-    confirms   : string option;
-    output     : string;
-    of_incs    : string option;
-    tool       : string;
-    view       : string option;
-    store      : string option;
-    update     : bool;
-    of_db      : string option;
-    limits     : (int * Limit.quantity) list;
-    verbose    : bool;
-  } [@@deriving fields]
-
-  let create a b recipes d e f g h i j k l m =
-    Fields.create a b (List.concat recipes) d e f g h i j k l m
-
-end
-
-let is_specified opt ~default =
-  Cmdliner.Term.eval_peek_opts opt |>
-  fst |> Option.value ~default
-
-let print_recipes_and_exit tool =
-  let recipes = Recipe.list tool  in
+let print_recipes_and_exit ctxt =
+  let recipes = Recipe.list ctxt.tool  in
   List.iter recipes ~f:(fun r ->
       printf "%-32s %s\n" (Recipe.name r) (Recipe.description r));
   exit 0
@@ -278,63 +226,42 @@ let print_artifacts_and_exit () =
   List.iter images ~f:(fun tag -> printf "%s\n" tag);
   exit 0
 
+let create_view = function
+  | None -> View.create ()
+  | Some f -> View.of_file f
+
 let main o print_recipes print_artifacts =
-  let open O in
-  let save artis =
-    match o.store with
+  let save artis = match o.store with
     | None -> ()
     | Some file -> Bap_report_io.dump file artis in
-  let tool = check_toolkit o.tool in
-  if print_recipes   then print_recipes_and_exit tool;
+  if print_recipes   then print_recipes_and_exit o.context;
   if print_artifacts then print_artifacts_and_exit ();
-  let confirmed = match o.confirms with
-    | None -> Map.empty (module String)
-    | Some path -> read_confirmations path in
-  let view = match o.view with
-    | None -> View.create ()
-    | Some f -> View.of_file f in
+  let confirmed = read_confirmations o.confirms in
+  let view = create_view o.view in
   let runner = Runner.create view o.output in
   let runner = match o.store, o.update with
     | Some file, true ->
       let artis = Bap_report_io.read file in
       List.fold artis ~init:runner ~f:(fun r a -> Runner.update r (Local,a))
     | _ -> runner in
-  let limit = List.fold o.limits
-                ~init:Limit.empty ~f:(fun l (n,q) -> Limit.add l n q) in
-  match o.schedule, o.of_incs, o.of_db with
-  | Some sch, _, _ ->
-    print_bap_version tool;
-    let artis = run_schedule o.verbose tool runner confirmed sch limit in
+  match o.mode with
+  | From_schedule sch ->
+    print_bap_version o.context;
+    let artis = run_schedule o.context runner confirmed sch in
     save artis
-  | _, Some file,_ -> of_incidents_file confirmed runner file
-  | _,_, Some db ->
+  | From_incidents incs -> of_incidents_file confirmed runner incs
+  | From_stored db ->
     let artis = Bap_report_io.read db in
-    let runner = List.fold artis ~init:runner ~f:(fun r a ->
-        Runner.update r (Local,a)) in
+    let runner = List.fold artis ~init:runner
+                   ~f:(fun r a -> Runner.update r (Local,a)) in
     Runner.run runner
-  | _ ->
-    print_bap_version tool;
-    run_artifacts o.verbose tool runner confirmed o.artifacts o.recipes limit |>
+  | Run_artifacts ->
+    print_bap_version o.context;
+    run_artifacts o.context runner confirmed o.artifacts o.recipes |>
     save
 
-open Cmdliner
-
-let o =
-  Term.(const O.create
-        $schedule
-        $artifacts
-        $recipes
-        $confirms
-        $output
-        $of_incidents
-        $tool
-        $view
-        $store
-        $update
-        $of_file
-        $limits
-        $verbose)
-
-let _ = Term.eval (Term.(const main $o $list_recipes $list_artifacts), info)
+let _ =
+  let open Cmdliner in
+  Term.eval (Term.(const main $options $list_recipes $list_artifacts), info)
 
 (* TODO: install view file somewhere *)

@@ -39,6 +39,9 @@ module Std : sig
       (** [with_tag t tag] return the image [r] with a new [tag] *)
       val with_tag: t -> string -> t
 
+      (** [name im] return name of the image [im] *)
+      val name : t -> string
+
     end
 
     (** [run ~entry ~mount image cmd] runs [cmd] with the docker [image].
