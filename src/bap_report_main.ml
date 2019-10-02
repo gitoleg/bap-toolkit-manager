@@ -1,9 +1,34 @@
 open Core_kernel
 open Bap_report.Std
-open Bap_report_cmd_terms
 open Bap_report_options
 
 module Scheduled = Bap_report_scheduled
+
+type artifact_kind =
+  | Local
+  | Image
+
+type render = {
+    view : View.t;
+    outp : string;
+}
+
+type t = {
+    ctxt  : ctxt;
+    artis : (artifact_kind * artifact) String.Map.t;
+    render : render;
+    confirmed: confirmation Incident.Id.Map.t String.Map.t;
+}
+
+let create ctxt render confirmed =
+  { ctxt; artis = Map.empty (module String); render; confirmed }
+
+let update t (kind,arti) =
+  {t with artis =
+            Map.set t.artis (Artifact.name arti) (kind,arti) }
+
+let get t name = Map.find t.artis name
+let artifacts t = Map.data t.artis |> List.map ~f:snd
 
 module Bap_artifact = struct
 
@@ -11,21 +36,16 @@ module Bap_artifact = struct
 
   let with_tag tag = Docker.Image.with_tag image tag
 
-  type kind =
-    | Local
-    | Image
+  let run ctxt =
+    Job.run ~verbose:ctxt.verbose ~tool:ctxt.tool ~limit:ctxt.limit
 
   let run_recipe ctxt arti kind r  =
-    let run =
-      Job.run r ~verbose:ctxt.verbose ~tool:ctxt.tool ~limit:ctxt.limit in
+    let run = run ctxt r in
     match kind with
     | Local -> run (Artifact.name arti)
-    | Image ->
-      let image = with_tag (Artifact.name arti) in
-      run ~image "/artifact"
+    | Image -> run ~image:(with_tag (Artifact.name arti)) "/artifact"
 
-  let can't_find tag reason =
-    eprintf "can't find %s: %s\n" tag reason
+  let can't_find tag reason = eprintf "can't find %s: %s\n" tag reason
 
   let artifact_exists tag =
     let image = with_tag tag in
@@ -58,35 +78,26 @@ module Bap_artifact = struct
       Some (Image, Artifact.create ?size name)
 end
 
-module Runner = struct
+module Render = struct
 
-  type t = {
-    view : View.t;
-    arts : (Bap_artifact.kind * artifact) String.Map.t;
-    outp : string;
-  }
+  type t = render
+
+  let create_view = function
+    | None -> View.create ()
+    | Some f -> View.of_file f
 
   let create view output = {
-    view;
-    arts = Map.empty (module String);
+    view = create_view view;
     outp = output;
   }
 
-  let update t (kind,arti) =
-    {t with arts =
-              Map.set t.arts (Artifact.name arti) (kind,arti) }
-
-  let get t name = Map.find t.arts name
-
-  let run t =
-    let artis = Map.data t.arts |> List.map ~f:snd in
+  let run t artis =
     let doc = Template.render t.view artis in
     Out_channel.with_file t.outp
       ~f:(fun ch -> Out_channel.output_string ch doc)
-
-  let artifacts t = Map.data t.arts |> List.map ~f:snd
 end
 
+let render t = Render.run t.render (artifacts t)
 let check_equal x y = compare_incident_kind x y = 0
 
 let check_diff xs ys =
@@ -111,9 +122,6 @@ let read_confirmations = function
              | None -> map_of_alist ~init:Incident.Id.Map.empty confs
              | Some confs' -> map_of_alist ~init:confs' confs))
 
-let check_mem checks c =
-  List.mem checks c ~equal:(fun c c' -> Incident.Kind.compare c c' = 0)
-
 let confirm confirmations arti kinds =
   match Map.find confirmations (Artifact.name arti) with
   | None -> arti
@@ -135,11 +143,6 @@ let confirm confirmations arti kinds =
                   (Confirmation.incident_kind conf)  in
               Artifact.update arti inc  status
             | _ -> arti)
-
-let print_bap_version ctxt =
-  match Docker.run ctxt.tool "--version" with
-  | None -> ()
-  | Some str -> printf "bap version: %s" str
 
 let print_errors job =
   List.iter (Job.errors job) ~f:(eprintf "%s\n")
@@ -165,55 +168,53 @@ let run_artifact ctxt confirmed arti kind recipe =
     let arti = update_time arti checks (Job.time job)  in
     confirm confirmed arti checks
 
-let run ctxt runner confirmed name recipes =
-  match Runner.get runner name with
-  | None -> runner
+let run t name recipes =
+  match get t name with
+  | None -> t
   | Some (kind,arti) ->
-    List.fold ~init:(runner,arti) recipes ~f:(fun (runner,arti) reci ->
-        let arti = run_artifact ctxt confirmed arti kind reci in
-        let runner = Runner.update runner (kind,arti) in
-        Runner.run runner;
-        runner,arti) |> fst
+    List.fold ~init:(t,arti) recipes ~f:(fun (t,arti) recipe ->
+        let arti = run_artifact t.ctxt t.confirmed arti kind recipe in
+        let t = update t (kind,arti) in
+        Render.run t.render (artifacts t);
+        t,arti) |> fst
 
-let run_artifacts ctxt runner confirmed artis recipes =
-  let runner =
+let run_artifacts t artis recipes =
+  let t =
     List.fold artis
-      ~init:runner ~f:(fun r name ->
+      ~init:t ~f:(fun r name ->
           match Bap_artifact.find name with
           | None ->
             eprintf "didn't find artifact %s, skipping ... \n" name;
             r
-          | Some a -> Runner.update r a) in
-  let runner =
-    List.fold artis
-      ~init:runner ~f:(fun runner name ->
-          run ctxt runner confirmed name recipes) in
-  Runner.artifacts runner
+          | Some a -> update r a) in
+  let t =
+    List.fold artis ~init:t ~f:(fun t name -> run t name recipes) in
+  artifacts t
 
-let run_schedule ctxt runner confirmed path =
-  let acts = Scheduled.of_file ctxt.tool path  in
-  let runner =
+let run_schedule t path =
+  let acts = Scheduled.of_file t.ctxt.tool path  in
+  let t =
     List.fold acts
-      ~init:runner ~f:(fun r {Scheduled.artifact;} ->
+      ~init:t ~f:(fun t {Scheduled.artifact;} ->
           match Bap_artifact.find artifact with
-          | None -> r
-          | Some a -> Runner.update r a) in
-  let runner =
+          | None -> t
+          | Some a -> update t a) in
+  let t =
     List.fold acts
-      ~init:runner
+      ~init:t
       ~f:(fun runner s ->
-          run ctxt runner confirmed s.artifact s.recipes) in
-  Runner.artifacts runner
+          run t s.artifact s.recipes) in
+  artifacts t
 
-let of_incidents_file confirmations runner filename =
+let of_incidents_file t filename =
   let name = Filename.remove_extension filename in
   let incidents = In_channel.with_file filename ~f:Read.incidents in
   let artifact = Artifact.create name in
   let artifact = List.fold incidents ~init:artifact
       ~f:(fun a i -> Artifact.update a i Undecided) in
-  let artifact = confirm confirmations artifact (Artifact.checks artifact) in
-  let x = Runner.update runner (Local, artifact) in
-  Runner.run x
+  let artifact = confirm t.confirmed artifact (Artifact.checks artifact) in
+  let t = update t (Local, artifact) in
+  Render.run t.render (artifacts t)
 
 let print_recipes_and_exit ctxt =
   let recipes = Recipe.list ctxt.tool  in
@@ -226,9 +227,10 @@ let print_artifacts_and_exit () =
   List.iter images ~f:(fun tag -> printf "%s\n" tag);
   exit 0
 
-let create_view = function
-  | None -> View.create ()
-  | Some f -> View.of_file f
+let print_bap_version ctxt =
+  match Docker.run ctxt.tool "--version" with
+  | None -> ()
+  | Some str -> printf "bap version: %s" str
 
 let main o print_recipes print_artifacts =
   let save artis = match o.store with
@@ -237,31 +239,31 @@ let main o print_recipes print_artifacts =
   if print_recipes   then print_recipes_and_exit o.context;
   if print_artifacts then print_artifacts_and_exit ();
   let confirmed = read_confirmations o.confirms in
-  let view = create_view o.view in
-  let runner = Runner.create view o.output in
-  let runner = match o.store, o.update with
+  let ren = Render.create o.view o.output in
+  let t = create o.context ren confirmed in
+  let t = match o.store, o.update with
     | Some file, true ->
       let artis = Bap_report_io.read file in
-      List.fold artis ~init:runner ~f:(fun r a -> Runner.update r (Local,a))
-    | _ -> runner in
+      List.fold artis ~init:t ~f:(fun t a -> update t (Local,a))
+    | _ -> t in
   match o.mode with
-  | From_schedule sch ->
+  | From_schedule schedule ->
     print_bap_version o.context;
-    let artis = run_schedule o.context runner confirmed sch in
+    let artis = run_schedule t schedule in
     save artis
-  | From_incidents incs -> of_incidents_file confirmed runner incs
+  | From_incidents incs -> of_incidents_file t incs
   | From_stored db ->
     let artis = Bap_report_io.read db in
-    let runner = List.fold artis ~init:runner
-                   ~f:(fun r a -> Runner.update r (Local,a)) in
-    Runner.run runner
+    let t = List.fold artis ~init:t ~f:(fun t a -> update t (Local,a)) in
+    render t
   | Run_artifacts ->
     print_bap_version o.context;
-    run_artifacts o.context runner confirmed o.artifacts o.recipes |>
+    run_artifacts t o.artifacts o.recipes |>
     save
 
 let _ =
   let open Cmdliner in
+  let open Bap_report_cmd_terms in
   Term.eval (Term.(const main $options $list_recipes $list_artifacts), info)
 
 (* TODO: install view file somewhere *)
