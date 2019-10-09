@@ -12,6 +12,7 @@ type info =
   | Web of string
   | Tab of col list
   | Alias of string
+  | Providers of string list
 [@@deriving sexp]
 
 
@@ -96,14 +97,24 @@ let get_tab data =
     Some (Tab (List.map data ~f:col_of_sexp))
   with _ -> None
 
+let get_expected kind data =
+  let rec get acc = function
+    | Sexp.Atom x -> x :: acc
+    | Sexp.List xs ->
+      List.fold xs ~init:acc ~f:get in
+  let recipes = List.fold data ~init:[] ~f:get in
+  Some (Providers recipes)
+
 let info_of_sexp s =
   let open Sexp in
   match s with
   | List (Atom s :: Atom kind :: data) ->
+    let kind = Incident.Kind.of_string kind in
     let data = match s with
       | "alias" -> get_alias data
       | "web"   -> get_web data
       | "tab"   -> get_tab data
+      | "expected" -> get_expected kind data
       | _ -> None in
     Option.value_map data ~default:None ~f:(fun x -> Some (kind,x))
   | _ -> None
@@ -124,9 +135,18 @@ let read ch =
       match info_of_str line with
       | None -> loop lines
       | Some (kind,info) ->
-        update t (Incident.Kind.of_string kind) info;
+        update t kind info;
         loop lines in
   loop (Read.lines ~comments:"#" ch);
   t
 
 let of_file fname = In_channel.with_file fname ~f:read
+
+let provides (t : t) name =
+  Hashtbl.fold ~init:[] t ~f:(fun ~key:kind ~data:infos acc ->
+      List.fold ~init:acc infos ~f:(fun acc -> function
+          | Providers names ->
+            if List.mem names name ~equal:String.equal
+            then Incident.Kind.of_string kind :: acc
+            else acc
+          | _ -> acc))

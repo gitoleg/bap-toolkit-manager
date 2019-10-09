@@ -11,6 +11,7 @@ type info =
   | Web of string
   | Tab of col list
   | Alias of string
+  | Providers of string list
 
 type t
 
@@ -23,3 +24,5 @@ val web  : t -> incident_kind -> string option
 val data : t -> incident -> string list
 
 val of_file : string -> t
+
+val provides : t -> string -> incident_kind list
