@@ -6,23 +6,15 @@ type col =
   | Name
   | Addr
   | Locations
+[@@deriving sexp]
 
 type info =
   | Web of string
-  | Tab of col list
+  | Col of col
   | Alias of string
-  | Providers of string list
+[@@deriving sexp]
 
-type t
-
-val create : unit -> t
-
-val update : t -> incident_kind -> info -> unit
-
-val name : t -> incident_kind -> string
-val web  : t -> incident_kind -> string option
-val data : t -> incident -> string list
-
-val of_file : string -> t
-
-val provides : t -> string -> incident_kind list
+val register : incident_kind -> info -> unit
+val name : incident_kind -> string
+val web  : incident_kind -> string option
+val tab_of_incident : incident -> string list
