@@ -17,3 +17,5 @@ val prepare : ctxt -> recipe -> file -> steady t
 val run : ctxt -> steady t -> ready t
 
 val journal : 'a t -> Bap_report_script.journal
+
+val name : 'a t -> string

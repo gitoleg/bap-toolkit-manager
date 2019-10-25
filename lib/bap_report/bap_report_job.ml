@@ -18,7 +18,11 @@ type journal = Journal.t
 type steady = string
 type ready = unit
 
-type 'a t = journal * 'a
+type 'a t = {
+    name : string;
+    journal : journal;
+    payload : 'a;
+  }
 
 type ctxt = {
   tool    : tool;
@@ -28,11 +32,8 @@ type ctxt = {
 
 let drive = "/mydrive"
 let pwd = Sys.getcwd
-let incidents (j,_) = Journal.incidents j
-let errors (j,_) = Journal.errors j
-let time (j,default) = Option.value ~default (Journal.time j)
-let journal (j,_) = j
 
+let journal t = t.journal
 
 let entry script =
   let tmp = Filename.temp_file ~temp_dir:(pwd ()) "script" "" in
@@ -67,6 +68,7 @@ let apply tool entry =
   | None -> ignore @@ cmd "sh %s" entry
 
 let prepare {verbose; tool; limit} recipe file =
+  let name = sprintf "%s:%s" (File.path file) (Recipe.name recipe) in
   let alias = Filename.temp_file ~temp_dir:(pwd ()) "artifact" "" in
   copy_target file (Filename.basename alias);
   let workdir = workdir file (Recipe.name recipe) in
@@ -79,8 +81,10 @@ let prepare {verbose; tool; limit} recipe file =
   let entry = entry script in
   at_exit (fun _ -> Sys.remove alias);
   at_exit (fun _ -> Sys.remove entry);
-  journal, entry
+  {journal;payload=entry; name}
 
-let run {tool;} (journal, entry) =
-  apply tool entry;
-  journal, ()
+let run {tool;} t =
+  apply tool t.payload;
+  { t with payload = (); }
+
+let name t = t.name

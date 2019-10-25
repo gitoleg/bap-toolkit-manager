@@ -1,3 +1,4 @@
+open Core_kernel
 open Bap_report_types
 
 type recipe = Bap_report_recipe.t
@@ -9,6 +10,10 @@ module Journal : sig
   val incidents : t -> Bap_report_types.incident list
   val errors : t -> string list
   val time : t -> float option
+  val equal : t -> t -> bool
+
+  include Identifiable.S with type t := t
+
 end
 
 val create :

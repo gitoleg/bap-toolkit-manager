@@ -2,7 +2,8 @@ open Core_kernel
 open Bap_report.Std
 open Bap_report_options
 
-module Scheduled = Bap_report_scheduled
+module Run = Bap_report_run
+
 
 type t = {
   ctxt  : Job.ctxt;
@@ -76,7 +77,9 @@ let update_time arti checks = function
        ~f:(fun arti c -> Artifact.with_time arti c time)
 
 let map_of_alist ~init xs =
-  List.fold ~init xs ~f:(fun m conf -> Map.set m (Confirmation.id conf) conf)
+  List.fold ~init xs
+    ~f:(fun m conf ->
+      Map.set m (Confirmation.id conf) conf)
 
 let read_confirmations = function
   | None -> Map.empty (module String)
@@ -108,7 +111,7 @@ let confirm confirmations arti kinds =
               let inc = Incident.create
                   (Confirmation.locations conf)
                   (Confirmation.incident_kind conf)  in
-              Artifact.update arti inc  status
+              Artifact.update arti inc status
             | _ -> arti)
 
 let print_errors job =
@@ -168,6 +171,15 @@ let run_artifacts t tasks =
       List.fold ~init:t names
         ~f:(fun t name -> run t name recipes))
 
+
+let create_artifact name =
+  match Bap_artifact.find name with
+  | None ->
+     eprintf "didn't find artifact %s, skipping ... \n" name;
+     None
+  | a -> a
+
+
 let create_artifacts t artis =
   List.fold artis
     ~init:t ~f:(fun r name ->
@@ -193,7 +205,7 @@ let print_artifacts_and_exit () =
   exit 0
 
 let main o print_recipes print_artifacts =
-  let save artis = match o.store with
+  let _save artis = match o.store with
     | None -> ()
     | Some file -> Bap_report_io.dump file artis in
   if print_artifacts then print_artifacts_and_exit ();
@@ -211,12 +223,29 @@ let main o print_recipes print_artifacts =
     let t = List.fold artis ~init:t ~f:(fun t a -> update t a) in
     render t
   | Run_artifacts tasks ->
-     let artis =
-      List.fold tasks ~init:[]
-        ~f:(fun acc (artis,_) -> acc @ artis) in
-    let t = create_artifacts t artis in
-    let t = run_artifacts t tasks in
-    save (artifacts t)
+     let tasks,_ =
+       List.fold tasks ~init:([],Map.empty (module String))
+         ~f:(fun (tasks,known) (artis,recipes) ->
+           let artis,known =
+             List.fold artis ~init:([],known) ~f:(fun (artis,known) name ->
+                 match Map.find known name with
+                 | Some a -> a :: artis, known
+                 | None -> match create_artifact name with
+                          | None -> artis, known
+                          | Some a ->
+                             a :: artis,
+                             Map.set known name a) in
+           (List.rev artis, recipes) :: tasks, known) in
+     let t = Run.create o.context o.output o.confirms in
+     ignore @@ Run.run_seq t tasks
+
+
+    (*  let artis =
+     *   List.fold tasks ~init:[]
+     *     ~f:(fun acc (artis,_) -> acc @ artis) in
+     * let t = create_artifacts t artis in
+     * let t = run_artifacts t tasks in *)
+    (* save (artifacts t) *)
 
 let _ =
   let open Cmdliner in
@@ -224,6 +253,7 @@ let _ =
   Term.eval (Term.(const main $options $list_recipes $list_artifacts), info)
 
 (* TODO: install view file somewhere
-   TODO: rewise all the directories/archives creation:
+   TODO: maybe rewise all the directories/archives creation:
          maybe make more distiguive names or place everything in the
-         temp dir *)
+         temp dir
+   TODO: check limits once more again *)

@@ -8,14 +8,16 @@ module Limit  = Bap_report_limit
 
 type recipe = Recipe.t
 type limit  = Limit.t
-type journal = string
+type journal = string  [@@deriving bin_io,compare,hash,sexp]
 
 let mytime = "mytime"
 let stdout = "bap.stdout"
 let stderr = "bap.stderr"
 
 module Journal = struct
-  type t = journal
+  type t = journal  [@@deriving bin_io,compare,hash,sexp]
+
+  let equal = String.equal
 
   let write dir = sprintf "tar czf %s.tgz %s" dir dir
 
@@ -69,6 +71,15 @@ module Journal = struct
     match read_tar mytime tar Time.of_file with
     | None -> None
     | Some tm -> Time.elapsed tm
+
+  module T = struct
+    type nonrec t = t [@@deriving bin_io,compare,hash,sexp]
+    let module_name = "Bap_report.Std.Journal"
+    let to_string x = x
+    let of_string x = x
+  end
+
+  include Identifiable.Make(T)
 
 end
 

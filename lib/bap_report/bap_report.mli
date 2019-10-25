@@ -234,8 +234,13 @@ module Std : sig
     (** [errors t] returns a list of errors from the bap log *)
     val errors : t -> string list
 
-    (** [time job] returns time  in seconds spent for the job [t] *)
+    (** [time journal] returns time in seconds spent for the [journal] *)
     val time : t -> float option
+
+    (** [equal journal]  *)
+    val equal : t -> t -> bool
+
+    include Identifiable.S with type t := t
   end
 
   type journal = Journal.t
@@ -263,6 +268,9 @@ module Std : sig
     (** [journal j] returns a journal where the result of
         the job [j] are stored *)
     val journal : 'a t -> journal
+
+    (** [name job] returns a human readable name of the [job] *)
+    val name : 'a t -> string
 
   end
 
