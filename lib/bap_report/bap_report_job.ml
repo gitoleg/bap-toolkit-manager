@@ -13,11 +13,12 @@ type tool = Bap_report_tool.t
 type recipe = Bap_report_recipe.t
 type limit = Bap_report_limit.t
 
-type t = {
-  incidents : incident list;
-  time : float;
-  errors : string list;
-}
+type journal = Journal.t
+
+type steady = string
+type ready = unit
+
+type 'a t = journal * 'a
 
 type ctxt = {
   tool    : tool;
@@ -27,9 +28,11 @@ type ctxt = {
 
 let drive = "/mydrive"
 let pwd = Sys.getcwd
-let incidents t = t.incidents
-let errors t = t.errors
-let time t = t.time
+let incidents (j,_) = Journal.incidents j
+let errors (j,_) = Journal.errors j
+let time (j,default) = Option.value ~default (Journal.time j)
+let journal (j,_) = j
+
 
 let entry script =
   let tmp = Filename.temp_file ~temp_dir:(pwd ()) "script" "" in
@@ -63,7 +66,7 @@ let apply tool entry =
          ~entry:(sprintf "%s/%s" drive @@ Filename.basename entry) ""
   | None -> ignore @@ cmd "sh %s" entry
 
-let run {verbose; tool; limit} recipe file =
+let prepare {verbose; tool; limit} recipe file =
   let alias = Filename.temp_file ~temp_dir:(pwd ()) "artifact" "" in
   copy_target file (Filename.basename alias);
   let workdir = workdir file (Recipe.name recipe) in
@@ -74,12 +77,10 @@ let run {verbose; tool; limit} recipe file =
     Script.create ~limit ~pwd ~verbose ~workdir
       ~path:(Filename.basename alias) recipe in
   let entry = entry script in
-  let start = Unix.gettimeofday () in
+  at_exit (fun _ -> Sys.remove alias);
+  at_exit (fun _ -> Sys.remove entry);
+  journal, entry
+
+let run {tool;} (journal, entry) =
   apply tool entry;
-  let finish = Unix.gettimeofday () in
-  Sys.remove alias;
-  Sys.remove entry;
-  let time = Option.value ~default:(finish -. start) (Journal.time journal) in
-  let incidents = Journal.incidents journal in
-  let errors = Journal.errors journal in
-  { incidents; time; errors }
+  journal, ()

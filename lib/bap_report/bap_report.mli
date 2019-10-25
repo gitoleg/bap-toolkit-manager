@@ -225,9 +225,26 @@ module Std : sig
   type file = File.t
   type tool = Tool.t
 
-  module Job : sig
-
+  module Journal : sig
     type t
+
+    (** [incidents t] returns a list of incidents *)
+    val incidents : t -> incident list
+
+    (** [errors t] returns a list of errors from the bap log *)
+    val errors : t -> string list
+
+    (** [time job] returns time  in seconds spent for the job [t] *)
+    val time : t -> float option
+  end
+
+  type journal = Journal.t
+
+  module Job : sig
+    type steady
+    type ready
+
+    type 'a t
     type ctxt
 
     (** [context ~verbose ~limit tool] creates a context for a
@@ -237,17 +254,15 @@ module Std : sig
         @param verbose saves bap BIR and asm output, true by default *)
     val context : ?verbose:bool -> ?limit:limit -> tool -> ctxt
 
-    (** [run ctxt recipe path ] runs the [recipe] for the artifact at [path]  *)
-    val run : ctxt -> recipe -> file -> t
+    (** [prepare ctxt recipe path ] prepares job to run *)
+    val prepare : ctxt -> recipe -> file -> steady t
 
-    (** [time job] returns time  in seconds spent for the job [t] *)
-    val time : t -> float
+    (** [run ctxt prepared] runs the prepared job *)
+    val run : ctxt -> steady t -> ready t
 
-    (** [incidents t] returns a list of incidents *)
-    val incidents : t -> incident list
-
-    (** [errors t] returns a list of errors from the stderr *)
-    val errors : t -> string list
+    (** [journal j] returns a journal where the result of
+        the job [j] are stored *)
+    val journal : 'a t -> journal
 
   end
 

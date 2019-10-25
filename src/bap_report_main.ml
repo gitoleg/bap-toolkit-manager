@@ -69,9 +69,11 @@ let check_diff xs ys =
       if List.mem ys c ~equal:check_equal then ac
       else c :: ac)
 
-let update_time arti checks time =
-  List.fold checks ~init:arti
-    ~f:(fun arti c -> Artifact.with_time arti c time)
+let update_time arti checks = function
+  | None -> arti
+  | Some time ->
+     List.fold checks ~init:arti
+       ~f:(fun arti c -> Artifact.with_time arti c time)
 
 let map_of_alist ~init xs =
   List.fold ~init xs ~f:(fun m conf -> Map.set m (Confirmation.id conf) conf)
@@ -110,7 +112,7 @@ let confirm confirmations arti kinds =
             | _ -> arti)
 
 let print_errors job =
-  List.iter (Job.errors job) ~f:(eprintf "%s\n")
+  List.iter (Journal.errors @@ Job.journal job) ~f:(eprintf "%s\n")
 
 let startup_time () =
   let open Unix in
@@ -132,17 +134,22 @@ let run_artifact t arti recipe =
   match Artifact.file arti with
   | None -> arti
   | Some file ->
-     let job = Job.run t.ctxt recipe file in
+     let job = Job.prepare t.ctxt recipe file in
+     let job = Job.run t.ctxt job in
      print_errors job;
-     let incs = Job.incidents job in
+     let jrnl = Job.journal job in
+     let time = Journal.time jrnl in
+     let incs = Journal.incidents jrnl in
      let missed = missed_kinds recipe incs in
      let arti = List.fold missed ~init:arti
                   ~f:(fun arti kind ->
                     let a = Artifact.no_incidents arti kind in
-                    Artifact.with_time a kind (Job.time job)) in
+                    match time with
+                    | None -> a
+                    | Some time -> Artifact.with_time a kind time) in
      let arti = List.fold incs ~init:arti ~f:(fun a i -> Artifact.update a i Undecided) in
      let diff = check_diff (Artifact.checks arti) checks in
-     let arti = update_time arti diff (Job.time job)  in
+     let arti = update_time arti diff time in
      confirm t.confirmed arti diff
 
 let run t name recipes =
