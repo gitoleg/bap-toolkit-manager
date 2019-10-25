@@ -238,6 +238,7 @@ let main o print_recipes print_artifacts =
            (List.rev artis, recipes) :: tasks, known) in
      let t = Run.create o.context o.output o.confirms in
      ignore @@ Run.run_seq t tasks
+     (* ignore @@ Run.run_parallel t tasks 2 *)
 
 
     (*  let artis =

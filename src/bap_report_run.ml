@@ -102,8 +102,8 @@ let artifacts ?names t =
       if mem name then data.arti :: artis
       else artis)
 
-let render t ready =
-  let doc = Template.render (artifacts ~names:ready t) in
+let render ?ready t =
+  let doc = Template.render (artifacts ?names:ready t) in
   Out_channel.with_file t.output
     ~f:(fun ch -> Out_channel.output_string ch doc)
 
@@ -174,7 +174,7 @@ let run_seq t xs =
          let task = { task with arti } in
          let t = {t with tasks = Map.set t.tasks (Artifact.name arti) task} in
          let ready = Set.add ready (Artifact.name arti) in
-         render t ready;
+         render t ~ready;
          t, ready)
 
 let add t arti =
@@ -196,6 +196,51 @@ let of_db t db =
   let t = List.fold artis ~init:t ~f:add in
   render t
 
+let run_threads ctxt ts =
+  let run jobs =
+    List.iter jobs ~f:(fun j -> ignore @@ Job.run ctxt j) in
+  let rec loop acc = function
+    | [] -> acc
+    | t :: ts ->
+       match Unix.fork () with
+       | 0 -> run t; exit 0
+       | pid -> loop (pid :: acc) ts in
+  List.iter (loop [] ts) ~f:(fun pid -> ignore @@ Unix.waitpid [] pid)
+
+let run_parallel t xs n =
+  let t,jobs = prepare_jobs t xs in
+  let chunks =                  (* WRONG!  *)
+    let len = List.length jobs in
+    let n' = len / n in
+    if n' * n <> len then n' + 1
+    else n' in
+  let threads = List.chunks_of ~length:chunks jobs in
+  run_threads t.ctxt threads;
+  let t =
+    List.fold jobs ~init:t ~f:(fun t j ->
+        printf "%s: %s\n%!" (startup_time ()) (Job.name j);
+        let journal = Job.journal j in
+        match find_by_journal t journal with
+        | None -> t
+        | Some task ->
+           let incs = Journal.incidents journal in
+           let time = Journal.time journal in
+           let expected = find_expected t journal in
+           let missed = missed_kinds expected incs in
+           let checks = Artifact.checks task.arti in
+           let arti = List.fold missed ~init:task.arti
+                        ~f:(fun arti kind ->
+                          let a = Artifact.no_incidents arti kind in
+                          match time with
+                          | None -> a
+                          | Some time -> Artifact.with_time a kind time) in
+           let arti = List.fold incs ~init:arti ~f:(fun a i -> Artifact.update a i Undecided) in
+           let diff = check_diff (Artifact.checks arti) checks in
+           let arti = update_time arti diff time in
+           let arti = confirm t.confirmed arti diff in
+           let task = { task with arti } in
+           {t with tasks = Map.set t.tasks (Artifact.name arti) task}) in
+   render t
 
 (* let bind xt f =
  *   match xt with

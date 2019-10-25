@@ -67,6 +67,10 @@ let apply tool entry =
          ~entry:(sprintf "%s/%s" drive @@ Filename.basename entry) ""
   | None -> ignore @@ cmd "sh %s" entry
 
+let remove x =
+  try Sys.remove x
+  with _ -> ()
+
 let prepare {verbose; tool; limit} recipe file =
   let name = sprintf "%s:%s" (File.path file) (Recipe.name recipe) in
   let alias = Filename.temp_file ~temp_dir:(pwd ()) "artifact" "" in
@@ -79,8 +83,8 @@ let prepare {verbose; tool; limit} recipe file =
     Script.create ~limit ~pwd ~verbose ~workdir
       ~path:(Filename.basename alias) recipe in
   let entry = entry script in
-  at_exit (fun _ -> Sys.remove alias);
-  at_exit (fun _ -> Sys.remove entry);
+  at_exit (fun _ -> remove alias);
+  at_exit (fun _ -> remove entry);
   {journal;payload=entry; name}
 
 let run {tool;} t =
