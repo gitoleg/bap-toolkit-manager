@@ -195,3 +195,7 @@ let limits =
 let verbose =
   let doc = "Preserves BIR and assembler output, true by default" in
   Arg.(value & opt bool true & info ["verbose";] ~doc)
+
+let jobs =
+  let doc = "Run few analysis simultaneously" in
+  Arg.(value & opt int 1 & info ["jobs"; "-j"] ~doc)

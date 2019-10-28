@@ -75,7 +75,7 @@ let main o print_recipes print_artifacts =
                              a :: artis,
                              Map.set known name a) in
            (List.rev artis, recipes) :: tasks, known) in
-     Run.run t tasks 2
+     Run.run t tasks o.jobs
 
 let _ =
   let open Cmdliner in

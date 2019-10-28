@@ -19,6 +19,7 @@ type t = {
   output     : string;
   store      : string option;
   update     : bool;
+  jobs       : int;
 } [@@deriving fields]
 
 let find_recipe tool r =
@@ -65,9 +66,9 @@ let print_and_exit tool recipes version =
   if recipes then print_recipes_and_exit tool;
   if version then print_bap_version_and_exit tool
 
-let create tool print_recipes print_bap_version mode ctxt conf out store update =
+let create tool print_recipes print_bap_version mode ctxt conf out store update j =
   print_and_exit tool print_recipes print_bap_version;
-  Fields.create mode ctxt conf out store update
+  Fields.create mode ctxt conf out store update j
 
 let check_if_nothing_to_do xs =
   let notify_and_exit what =
@@ -140,4 +141,4 @@ let options =
   const create
         $tool $list_recipes $bap_version
         $mode $ctxt $confirms $report
-        $store $update
+        $store $update $jobs
