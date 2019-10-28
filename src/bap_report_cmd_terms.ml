@@ -176,7 +176,7 @@ let update =
 
 let of_file =
   let doc = "create a report from previously stored data" in
-  Arg.(value & opt (some string) None & info ["from"; "-f"] ~doc)
+  Arg.(value & opt (some string) None & info ["from"; "f"] ~doc)
 
 let limits =
   let doc =
@@ -198,4 +198,4 @@ let verbose =
 
 let jobs =
   let doc = "Run few analysis simultaneously" in
-  Arg.(value & opt int 1 & info ["jobs"; "-j"] ~doc)
+  Arg.(value & opt int 1 & info ["jobs"; "j"] ~doc)
