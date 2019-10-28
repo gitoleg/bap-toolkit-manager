@@ -12,7 +12,18 @@ type t = {
   confirmed : confirmation Incident.Id.Map.t String.Map.t;
   output  : string;
   expected : Incident.Kind.Set.t Journal.Map.t;
+  store : string option;
 }
+
+
+let new_task arti = {
+  arti;
+  journals = []
+}
+
+let add_task t arti =
+  let task = new_task arti in
+  {t with tasks = Map.set t.tasks (Artifact.name arti) task}
 
 let map_of_alist ~init xs =
   List.fold ~init xs
@@ -52,21 +63,24 @@ let confirm confirmations arti kinds =
               Artifact.update arti inc status
             | _ -> arti)
 
-let create ctxt output conf =
-  let confirmed = read_confirmations conf in
-  {
+let create ?confirmations ?store ~output ctxt =
+  let t = {
     ctxt;
     tasks = Map.empty (module String);
     output;
-    confirmed;
+    confirmed = read_confirmations confirmations;
     expected = Map.empty (module Journal);
-  }
-
-
-let new_task arti = {
-  arti;
-  journals = []
-}
+    store = None;
+  } in
+  match store with
+  | Some (file,update) ->
+     let t =
+       if update then
+         let artis = Bap_report_io.read file in
+         List.fold artis ~init:t ~f:(fun t a -> add_task t a)
+       else t in
+     {t with store = Some file}
+  | None -> t
 
 let prepare_jobs t xs =
   let find_task t a =
@@ -112,8 +126,8 @@ let find_by_journal t j =
   List.find ~f:(fun task ->
       List.exists task.journals ~f:(fun j' -> Journal.equal j j'))
 
-let print_errors job =
-  List.iter (Journal.errors @@ Job.journal job) ~f:(eprintf "%s\n")
+let print_errors j =
+  List.iter (Journal.errors j) ~f:(eprintf "%s\n")
 
 let missed_kinds expected incidents =
   let happened = List.fold incidents ~init:(Set.empty (module Incident.Kind))
@@ -144,42 +158,93 @@ let startup_time () =
   let t = gettimeofday () |> localtime in
   sprintf "%02d:%02d:%02d" t.tm_hour t.tm_min t.tm_sec
 
+let notify_started j =
+  printf "%s: started %s\n%!" (startup_time ()) (Job.name j)
+
+let name_of_task t = Artifact.name t.arti
+
+let update_task t task journal =
+  print_errors journal;
+  let incs = Journal.incidents journal in
+  let time = Journal.time journal in
+  let expected = find_expected t journal in
+  let missed = missed_kinds expected incs in
+  let checks = Artifact.checks task.arti in
+  let arti = List.fold missed ~init:task.arti
+               ~f:(fun arti kind ->
+                 let a = Artifact.no_incidents arti kind in
+                 match time with
+                 | None -> a
+                 | Some time -> Artifact.with_time a kind time) in
+  let arti = List.fold incs ~init:arti ~f:(fun a i -> Artifact.update a i Undecided) in
+  let diff = check_diff (Artifact.checks arti) checks in
+  let arti = update_time arti diff time in
+  let arti = confirm t.confirmed arti diff in
+  { task with arti }
 
 let run_seq t xs =
   let t,jobs = prepare_jobs t xs in
   let ready = Set.empty (module String) in
   List.fold jobs ~init:(t,ready) ~f:(fun (t,ready) j ->
-      printf "%s: %s\n%!" (startup_time ()) (Job.name j);
+      notify_started j;
       let j = Job.run t.ctxt j in
-      print_errors j;
       let journal = Job.journal j in
       match find_by_journal t journal with
       | None -> t,ready
       | Some task ->
-         let incs = Journal.incidents journal in
-         let time = Journal.time journal in
-         let expected = find_expected t journal in
-         let missed = missed_kinds expected incs in
-         let checks = Artifact.checks task.arti in
-         let arti = List.fold missed ~init:task.arti
-                      ~f:(fun arti kind ->
-                        let a = Artifact.no_incidents arti kind in
-                        match time with
-                        | None -> a
-                        | Some time -> Artifact.with_time a kind time) in
-         let arti = List.fold incs ~init:arti ~f:(fun a i -> Artifact.update a i Undecided) in
-         let diff = check_diff (Artifact.checks arti) checks in
-         let arti = update_time arti diff time in
-         let arti = confirm t.confirmed arti diff in
-         let task = { task with arti } in
-         let t = {t with tasks = Map.set t.tasks (Artifact.name arti) task} in
-         let ready = Set.add ready (Artifact.name arti) in
+         let task = update_task t task journal in
+         let t = {t with tasks = Map.set t.tasks (name_of_task task) task} in
+         let ready = Set.add ready (name_of_task task) in
          render t ~ready;
-         t, ready)
+         t, ready) |> fst
 
-let add t arti =
-  let task = new_task arti in
-  {t with tasks = Map.set t.tasks (Artifact.name arti) task}
+let run_threads ctxt ts =
+  let run jobs =
+    List.iter jobs ~f:(fun j ->
+        (* notify_started j; *)
+        ignore @@ Job.run ctxt j) in
+  let rec loop acc = function
+    | [] -> acc
+    | t :: ts ->
+       match Unix.fork () with
+       | 0 -> run t; exit 0
+       | pid -> loop (pid :: acc) ts in
+  let waits = loop [] ts in
+  List.iter waits ~f:(fun pid -> ignore @@ Unix.waitpid [] pid)
+
+let plain_balance xs n =
+  let procs = Array.init n ~f:(fun _ -> []) in
+  let _ =
+    List.fold xs ~init:0
+      ~f:(fun i x ->
+        Array.set procs i (x :: procs.(i));
+        (i + 1) mod n) in
+  Array.to_list procs |> List.filter ~f:(fun x -> x <> [])
+
+let run_parallel t xs n =
+  let t,jobs = prepare_jobs t xs in
+  let threads = plain_balance jobs n in
+  run_threads t.ctxt threads;
+  let t =
+    List.fold jobs ~init:t ~f:(fun t j ->
+        let journal = Job.journal j in
+        print_errors journal;
+        match find_by_journal t journal with
+        | None -> t
+        | Some task ->
+           let task = update_task t task journal in
+           {t with tasks = Map.set t.tasks (name_of_task task) task}) in
+  render t;
+  t
+
+let save t =
+  match t.store with
+  | None -> ()
+  | Some file -> Bap_report_io.dump file (artifacts t)
+
+let run t xs = function
+  | n when n < 2 -> run_seq t xs |> save
+  | n -> run_parallel t xs n |> save
 
 let of_incidents_file t filename =
   let name = Filename.remove_extension filename in
@@ -188,96 +253,10 @@ let of_incidents_file t filename =
   let artifact = List.fold incidents ~init:artifact
       ~f:(fun a i -> Artifact.update a i Undecided) in
   let artifact = confirm t.confirmed artifact (Artifact.checks artifact) in
-  let t = add t artifact in
+  let t = add_task t artifact in
   render t
 
 let of_db t db =
   let artis = Bap_report_io.read db in
-  let t = List.fold artis ~init:t ~f:add in
+  let t = List.fold artis ~init:t ~f:add_task in
   render t
-
-let run_threads ctxt ts =
-  let run jobs =
-    List.iter jobs ~f:(fun j -> ignore @@ Job.run ctxt j) in
-  let rec loop acc = function
-    | [] -> acc
-    | t :: ts ->
-       match Unix.fork () with
-       | 0 -> run t; exit 0
-       | pid -> loop (pid :: acc) ts in
-  List.iter (loop [] ts) ~f:(fun pid -> ignore @@ Unix.waitpid [] pid)
-
-let run_parallel t xs n =
-  let t,jobs = prepare_jobs t xs in
-  let chunks =                  (* WRONG!  *)
-    let len = List.length jobs in
-    let n' = len / n in
-    if n' * n <> len then n' + 1
-    else n' in
-  let threads = List.chunks_of ~length:chunks jobs in
-  run_threads t.ctxt threads;
-  let t =
-    List.fold jobs ~init:t ~f:(fun t j ->
-        printf "%s: %s\n%!" (startup_time ()) (Job.name j);
-        let journal = Job.journal j in
-        match find_by_journal t journal with
-        | None -> t
-        | Some task ->
-           let incs = Journal.incidents journal in
-           let time = Journal.time journal in
-           let expected = find_expected t journal in
-           let missed = missed_kinds expected incs in
-           let checks = Artifact.checks task.arti in
-           let arti = List.fold missed ~init:task.arti
-                        ~f:(fun arti kind ->
-                          let a = Artifact.no_incidents arti kind in
-                          match time with
-                          | None -> a
-                          | Some time -> Artifact.with_time a kind time) in
-           let arti = List.fold incs ~init:arti ~f:(fun a i -> Artifact.update a i Undecided) in
-           let diff = check_diff (Artifact.checks arti) checks in
-           let arti = update_time arti diff time in
-           let arti = confirm t.confirmed arti diff in
-           let task = { task with arti } in
-           {t with tasks = Map.set t.tasks (Artifact.name arti) task}) in
-   render t
-
-(* let bind xt f =
- *   match xt with
- *   | 0 -> 0
- *   | pids ->
- *      match Unix.fork () with
- *      | 0 -> f (); exit 0
- *      | pid -> pid
- *
- *
- * let (>>=) = bind
- *
- *
- * let test =
- *   do_some_job >>= fun pid ->
- *   do_some_job' >>= fun pid' ->
- *   Unix.wait [] pid;
- *   Unix.wait [] pid' *)
-
-
-
-
-(* let run_parallel t a b recipes =
- *   let () = printf "run in parallel!\n%!" in
- *   let pid = Unix.fork () in
- *   if pid = 0 then
- *     run t a recipes |> ignore
- *   else
- *     let pid' = Unix.fork () in
- *     if pid' = 0 then
- *       run t b recipes |> ignore
- *     else
- *       let () =
- *         ignore @@ (Unix.waitpid [] pid) in
- *       ignore (Unix.waitpid [] pid')
- *
- * let run_artifacts t tasks =
- *   match tasks with
- *   | [ [a;b],recipes ] -> run_parallel t a b recipes; t
- *   | _ -> run_artifacts t tasks *)

@@ -15,14 +15,18 @@ type limit = Bap_report_limit.t
 
 type journal = Journal.t
 
-type steady = string
+type steady = {
+  arti  : string;
+  entry : string;
+}
+
 type ready = unit
 
 type 'a t = {
-    name : string;
-    journal : journal;
-    payload : 'a;
-  }
+  name : string;
+  journal : journal;
+  payload : 'a;
+}
 
 type ctxt = {
   tool    : tool;
@@ -62,9 +66,9 @@ let context ?(verbose=true) ?(limit=Limit.empty) tool = {verbose; limit; tool}
 let apply tool entry =
   match Tool.image tool with
   | Some im ->
-     ignore @@
-       Image.run im ~mount:(pwd (), drive)
-         ~entry:(sprintf "%s/%s" drive @@ Filename.basename entry) ""
+    ignore @@
+    Image.run im ~mount:(pwd (), drive)
+      ~entry:(sprintf "%s/%s" drive @@ Filename.basename entry) ""
   | None -> ignore @@ cmd "sh %s" entry
 
 let remove x =
@@ -83,12 +87,12 @@ let prepare {verbose; tool; limit} recipe file =
     Script.create ~limit ~pwd ~verbose ~workdir
       ~path:(Filename.basename alias) recipe in
   let entry = entry script in
-  at_exit (fun _ -> remove alias);
-  at_exit (fun _ -> remove entry);
-  {journal;payload=entry; name}
+  {journal;payload={entry; arti=alias}; name}
 
-let run {tool;} t =
-  apply tool t.payload;
+let run {tool;} ({payload={entry;arti}; } as t) =
+  apply tool entry;
+  remove arti;
+  remove entry;
   { t with payload = (); }
 
 let name t = t.name
