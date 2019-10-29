@@ -150,4 +150,4 @@ let run ?entry ?mount image cmd' =
   let entry = match entry with
     | None -> ""
     | Some e -> sprintf "--entrypoint %s" e in
-  cmd "docker run --rm -ti %s %s %s %s" mount entry image cmd'
+  cmd "docker run --rm %s %s %s %s" mount entry image cmd'

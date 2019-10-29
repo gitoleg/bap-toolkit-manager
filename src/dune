@@ -6,6 +6,6 @@
         bin_prot
         cmdliner
         str
-        core_kernel
-        threads.posix)
+        parmap
+        core_kernel)
    (preprocess (pps ppx_jane)))
