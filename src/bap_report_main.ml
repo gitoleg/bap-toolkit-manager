@@ -54,13 +54,17 @@ let print_artifacts_and_exit () =
   List.iter images ~f:(fun tag -> printf "%s\n" tag);
   exit 0
 
-let main o print_recipes print_artifacts =
+let main o print_artifacts =
   if print_artifacts then print_artifacts_and_exit ();
   let store = Option.map o.store ~f:(fun x -> x, o.update) in
   let t = Run.create ?confirmations:o.confirms ?store ~output:o.output o.context in
   match o.mode with
   | From_incidents incs -> Run.of_incidents_file t incs
   | From_stored db -> Run.of_db t db
+  | Nothing ->
+     eprintf
+       "there is nothing I can do: check a list of artifacts/recipes\n";
+     exit 1
   | Run_artifacts tasks ->
      let tasks,_ =
        List.fold tasks ~init:([],Map.empty (module String))
@@ -80,7 +84,7 @@ let main o print_recipes print_artifacts =
 let _ =
   let open Cmdliner in
   let open Bap_report_cmd_terms in
-  Term.eval (Term.(const main $options $list_recipes $list_artifacts), info)
+  Term.eval (Term.(const main $options $list_artifacts), info)
 
 (* TODO: install view file somewhere
    TODO: maybe rewise all the directories/archives creation:

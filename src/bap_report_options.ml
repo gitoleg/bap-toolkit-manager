@@ -11,6 +11,7 @@ type mode =
   | From_incidents of string
   | From_stored    of string
   | Run_artifacts  of (string list * recipe list) list
+  | Nothing
 
 type t = {
   mode       : mode;
@@ -65,29 +66,24 @@ let print_and_exit tool recipes version =
 
 let create tool mode ctxt print_recipes print_bap_version conf out store update j =
   let tool = tool () in
+  print_and_exit tool print_recipes print_bap_version;
   let mode = mode tool in
   let ctxt = ctxt tool in
-  print_and_exit tool print_recipes print_bap_version;
   Fields.create mode ctxt conf out store update j
 
-let check_if_nothing_to_do xs =
-  let notify_and_exit what =
-    eprintf "the %s list is empty, nothing to do!\n" what;
-    exit 1 in
+let is_nothing_to_do xs =
   let names = List.map xs ~f:fst in
   let recipes = List.map xs ~f:snd in
-  if List.for_all names ~f:List.is_empty then
-    notify_and_exit "artifacts";
-  if List.for_all recipes ~f:List.is_empty then
-    notify_and_exit "recipes"
+  List.for_all names ~f:List.is_empty ||
+  List.for_all recipes ~f:List.is_empty
 
 let make_run tool = function
   | Error er ->
     eprintf "%s\n" @@ Error.to_string_hum er;
     exit 1
   | Ok xs ->
-    check_if_nothing_to_do xs;
-    Run_artifacts xs
+     if is_nothing_to_do xs then Nothing
+     else Run_artifacts xs
 
 let infer_mode config of_schedule of_file of_incidents artifacts recipes tool =
   let (>>=) = Or_error.(>>=) in
