@@ -6,8 +6,8 @@ type t = string * string option
 
 let split_string s =
   String.split_on_chars ~on:[' '; '\t'] s |>
-    List.filter ~f:(fun s -> s <> "") |>
-    List.map ~f:String.strip
+  List.filter ~f:(fun s -> s <> "") |>
+  List.map ~f:String.strip
 
 module type A = sig
   val tags : string -> string list
@@ -49,21 +49,24 @@ end
 
 module Loc_available = struct
 
-  let available () =
-    match cmd "docker images" with
-    | None | Some "" -> []
-    | Some r ->
-      match String.split ~on:'\n' r with
-      | [] | [_] -> []
-      | _header :: images ->
-        List.filter_map images ~f:(fun im ->
-            match split_string im with
-            | name :: tag :: _ ->
-              let tag = match tag with
-                | "<none>" -> None
-                | tag -> Some tag in
-              Some (name,tag)
-            | _ -> None)
+  let available =
+    Lazy.from_fun (fun () ->
+        match cmd "docker images" with
+        | None | Some "" -> []
+        | Some r ->
+          match String.split ~on:'\n' r with
+          | [] | [_] -> []
+          | _header :: images ->
+            List.filter_map images ~f:(fun im ->
+                match split_string im with
+                | name :: tag :: _ ->
+                  let tag = match tag with
+                    | "<none>" -> None
+                    | tag -> Some tag in
+                  Some (name,tag)
+                | _ -> None))
+
+  let available () = Lazy.force available
 
   let tags image =
     List.fold (available ()) ~init:[] ~f:(fun acc (im,tag) ->
@@ -107,12 +110,12 @@ let pull image =
 let get image =
   if exists_locally image then Ok ()
   else
-    if exists_globaly image then
-      let () = pull image in
-      if exists_locally image then Ok ()
-      else
-        Or_error.errorf "can't pull image %s" (to_string image)
-    else Or_error.errorf "can't detect image %s" (to_string image)
+  if exists_globaly image then
+    let () = pull image in
+    if exists_locally image then Ok ()
+    else
+      Or_error.errorf "can't pull image %s" (to_string image)
+  else Or_error.errorf "can't detect image %s" (to_string image)
 
 let check name  =
   match String.split name ~on:':' with

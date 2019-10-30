@@ -6,21 +6,20 @@ module Recipe = Bap_report_recipe
 
 type recipe = Bap_report_recipe.t
 
-type t =
+
+type kind =
   | Image of image
   | Host
 
-let bap_version = function
+type t = {
+  kind : kind;
+  recipes : recipe list;
+  bap_ver : string;
+}
+
+let find_bap_version = function
   | Image im -> Image.run im "--version"
   | Host -> cmd "bap --version"
-
-let check t =
-  match bap_version t with
-  | None -> Error (Error.of_string "bap not found!")
-  | Some _ -> Ok t
-
-let of_image im = check (Image im)
-let host () = check Host
 
 let split_on_first s ~on =
   let indexes = List.filter_map on ~f:(String.index s) in
@@ -35,29 +34,43 @@ let recipes_of_string s =
   let recipe_of_string s =
     match split_on_first ~on:[' '; '\t'] s with
     | name :: desc :: _ ->
-       let name = String.strip name in
-       let desc = String.strip desc in
-       Some (Recipe.create ~name ~desc)
+      let name = String.strip name in
+      let desc = String.strip desc in
+      Some (Recipe.create ~name ~desc)
     | _ -> None in
   let rs = String.split ~on:'\n' s in
   List.filter_map rs ~f:recipe_of_string
 
-let recipes tool =
-  let str = match tool with
+let collect_recipes kind =
+  let str = match kind with
     | Host -> cmd "bap --list-recipes"
     | Image im -> Image.run im "--list-recipes" in
   match str with
   | None | Some "" -> []
   | Some s -> recipes_of_string s
 
-let find_recipe tool recipe =
-  List.find (recipes tool)
+let create kind =
+  match find_bap_version kind with
+  | None -> Error (Error.of_string "bap not found!")
+  | Some bap_ver ->
+    let recipes = collect_recipes kind in
+    Ok {kind;recipes;bap_ver}
+
+let of_image im = create (Image im)
+let host () = create Host
+
+let recipes t = t.recipes
+
+let bap_version t = t.bap_ver
+
+let find_recipe t recipe =
+  List.find t.recipes
     ~f:(fun r -> String.equal (Recipe.name r) recipe)
 
-let image = function
+let image t = match t.kind with
   | Image im -> Some im
   | Host -> None
 
-let to_string  = function
+let to_string t = match t.kind with
   | Host -> "host"
   | Image im -> Image.to_string im

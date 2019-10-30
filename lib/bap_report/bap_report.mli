@@ -154,7 +154,7 @@ module Std : sig
         not recipe found *)
     val find_recipe : t -> string -> recipe option
 
-    val bap_version : t -> string option
+    val bap_version : t -> string
 
     val to_string : t -> string
 

@@ -6,6 +6,5 @@
         bin_prot
         cmdliner
         str
-        parmap
         core_kernel)
    (preprocess (pps ppx_jane)))

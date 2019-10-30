@@ -56,17 +56,17 @@ let print_recipes_and_exit tool =
   exit 0
 
 let print_bap_version_and_exit tool =
-  match Tool.bap_version tool with
-  | None ->
-     eprintf "bap not found in %s\n" (Tool.to_string tool);
-     exit 1
-  | Some str -> printf "bap version: %s" str; exit 0
+  printf "bap version: %s\n" @@Tool.bap_version tool;
+  exit 0
 
 let print_and_exit tool recipes version =
   if recipes then print_recipes_and_exit tool;
   if version then print_bap_version_and_exit tool
 
-let create tool print_recipes print_bap_version mode ctxt conf out store update j =
+let create tool mode ctxt print_recipes print_bap_version conf out store update j =
+  let tool = tool () in
+  let mode = mode tool in
+  let ctxt = ctxt tool in
   print_and_exit tool print_recipes print_bap_version;
   Fields.create mode ctxt conf out store update j
 
@@ -86,11 +86,12 @@ let make_run tool = function
     eprintf "%s\n" @@ Error.to_string_hum er;
     exit 1
   | Ok xs ->
-     check_if_nothing_to_do xs;
-     Run_artifacts xs
+    check_if_nothing_to_do xs;
+    Run_artifacts xs
 
-let infer_mode tool config of_schedule of_file of_incidents artifacts recipes =
+let infer_mode config of_schedule of_file of_incidents artifacts recipes tool =
   let (>>=) = Or_error.(>>=) in
+  let config = read_config config in
   match of_schedule, of_file, of_incidents with
   | Some f,_,_ ->
     let acts = Bap_report_scheduled.of_file f in
@@ -111,34 +112,33 @@ let infer_mode tool config of_schedule of_file of_incidents artifacts recipes =
       Ok [artis,recipes] in
     make_run tool rs
 
-let tool_of_string s =
+let tool_of_string s () =
   let tool = match s with
     | "host" -> Tool.host ()
     | s ->
-       Or_error.(Image.of_string s >>= Tool.of_image) in
+      Or_error.(Image.of_string s >>= Tool.of_image) in
   match tool with
   | Ok t -> t
   | Error er ->
-     eprintf "can't find or create tool %s: %s" s (Error.to_string_hum er);
-     exit 1
+    eprintf "can't find or create tool %s: %s" s (Error.to_string_hum er);
+    exit 1
 
-let context tool limits verbose =
+let context limits verbose tool =
   let limit = List.fold limits
-                ~init:Limit.empty ~f:(fun l (n,q) -> Limit.add l n q) in
+      ~init:Limit.empty ~f:(fun l (n,q) -> Limit.add l n q) in
   Job.context ~verbose ~limit tool
 
 open Cmd
 open Term
 
 let options =
-  let tool   = const tool_of_string $tool in
-  let config = const read_config $config in
-  let ctxt = const context $tool $limits $verbose in
+  let ctxt = const context $limits $verbose in
   let mode = const infer_mode
-                   $tool $config $schedule
-                   $of_file $of_incidents
-                   $artifacts $recipes in
-  const create
-        $tool $list_recipes $bap_version
-        $mode $ctxt $confirms $report
-        $store $update $jobs
+                  $config $schedule
+                  $of_file $of_incidents
+                  $artifacts $recipes in
+  let tool = const tool_of_string $tool in
+  const create $tool $mode $ctxt
+  $list_recipes $bap_version
+  $confirms $report
+  $store $update $jobs

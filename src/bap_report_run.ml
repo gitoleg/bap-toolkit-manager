@@ -213,11 +213,6 @@ let run_threads ctxt ts =
   List.iter waits ~f:(fun pid ->
       ignore @@ Unix.waitpid [] pid)
 
-let run_threads' ctxt ts ncores =
-  let open Parmap in
-  let run j = ignore @@ Job.run ctxt j in
-  pariter ~ncores run (L ts)
-
 let plain_balance xs n =
   let procs = Array.init n ~f:(fun _ -> []) in
   let _ =
