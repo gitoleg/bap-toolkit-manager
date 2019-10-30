@@ -21,12 +21,13 @@ module Bap_artifact = struct
       can't_find tag (Error.to_string_hum er);
       false
     | Ok () ->
-      let cmd = sprintf "find / -type f -name /artifact" in
-      match Image.run image cmd with
-      | None | Some "" ->
+      let cmd = {|[ -f /artifact ] && echo "Found" || echo "Not found"|} in
+      match Image.run ~interactive:true image cmd with
+      | Some x when String.strip x = "Found" -> true
+      |  _ ->
         can't_find tag "no such file in image";
         false
-      | _ -> true
+
 
   let file_of_name name =
     if Sys.file_exists name then Some (File.create name)
@@ -45,8 +46,8 @@ end
 let create_artifact name =
   match Bap_artifact.find name with
   | None ->
-     eprintf "didn't find artifact %s, skipping ... \n" name;
-     None
+    eprintf "didn't find artifact %s, skipping ... \n" name;
+    None
   | a -> a
 
 let print_artifacts_and_exit () =
@@ -62,24 +63,24 @@ let main o print_artifacts =
   | From_incidents incs -> Run.of_incidents_file t incs
   | From_stored db -> Run.of_db t db
   | Nothing ->
-     eprintf
-       "there is nothing I can do: check a list of artifacts/recipes\n";
-     exit 1
+    eprintf
+      "there is nothing I can do: check a list of artifacts/recipes\n";
+    exit 1
   | Run_artifacts tasks ->
-     let tasks,_ =
-       List.fold tasks ~init:([],Map.empty (module String))
-         ~f:(fun (tasks,known) (artis,recipes) ->
-           let artis,known =
-             List.fold artis ~init:([],known) ~f:(fun (artis,known) name ->
-                 match Map.find known name with
-                 | Some a -> a :: artis, known
-                 | None -> match create_artifact name with
-                          | None -> artis, known
-                          | Some a ->
-                             a :: artis,
-                             Map.set known name a) in
-           (List.rev artis, recipes) :: tasks, known) in
-     Run.run t tasks o.jobs
+    let tasks,_ =
+      List.fold tasks ~init:([],Map.empty (module String))
+        ~f:(fun (tasks,known) (artis,recipes) ->
+            let artis,known =
+              List.fold artis ~init:([],known) ~f:(fun (artis,known) name ->
+                  match Map.find known name with
+                  | Some a -> a :: artis, known
+                  | None -> match create_artifact name with
+                    | None -> artis, known
+                    | Some a ->
+                      a :: artis,
+                      Map.set known name a) in
+            (List.rev artis, recipes) :: tasks, known) in
+    Run.run t tasks o.jobs
 
 let _ =
   let open Cmdliner in

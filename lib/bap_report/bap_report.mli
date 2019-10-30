@@ -96,14 +96,19 @@ module Std : sig
       val name : t -> string
 
 
-    (** [run ~entry ~mount image cmd] runs [cmd] with the docker [image].
+    (** [run ~interactive ~entry ~mount image cmd] runs [cmd] with the docker [image].
+
+        @param interactive runs a docker as interactive processes,
+              false by default
 
         @param mount defines a mounting volume as a pair of pathes
              in the host and in the image.
 
         @param entry override an entrypoint for the [image] *)
-    val run : ?entry:string ->
-      ?mount:string * string -> image -> string -> string option
+      val run :
+        ?interactive:bool ->
+        ?entry:string ->
+        ?mount:string * string -> image -> string -> string option
 
     end
 

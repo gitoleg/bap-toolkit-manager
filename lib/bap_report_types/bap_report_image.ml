@@ -145,7 +145,7 @@ let tags (image,_) =
   | [] -> Loc_available.tags image
   | tags -> tags
 
-let run ?entry ?mount image cmd' =
+let run ?(interactive=false) ?entry ?mount image cmd' =
   let image = to_string image in
   let mount = match mount with
     | None -> ""
@@ -153,4 +153,5 @@ let run ?entry ?mount image cmd' =
   let entry = match entry with
     | None -> ""
     | Some e -> sprintf "--entrypoint %s" e in
-  cmd "docker run --rm %s %s %s %s" mount entry image cmd'
+  let ti = if interactive then "-ti" else "" in
+  cmd "docker run --rm %s %s %s %s %s" ti mount entry image cmd'

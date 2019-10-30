@@ -12,5 +12,7 @@ val get : t -> unit Or_error.t
 val with_tag: t -> string -> t
 val name : t -> string
 val tag  : t -> string option
-val run : ?entry:string ->
+val run :
+  ?interactive:bool ->
+  ?entry:string ->
   ?mount:string * string -> t -> string -> string option
