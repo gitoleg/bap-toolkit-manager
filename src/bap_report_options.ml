@@ -10,8 +10,7 @@ open Bap_report_scheduled
 type mode =
   | From_incidents of string
   | From_stored    of string
-  | Run_artifacts  of (string list * recipe list) list
-  | Nothing
+  | Run_artifacts  of (artifact list * recipe list) list
 
 type t = {
   mode       : mode;
@@ -22,6 +21,53 @@ type t = {
   update     : bool;
   jobs       : int;
 } [@@deriving fields]
+
+module Bap_artifact = struct
+
+  let image =
+    Lazy.from_fun (fun () ->
+        Image.of_string_exn "binaryanalysisplatform/bap-artifacts")
+
+  let with_tag tag = Image.with_tag (Lazy.force image) tag
+
+  let can't_find tag reason = eprintf "can't find %s: %s\n" tag reason
+
+  let artifact_exists tag =
+    let image = with_tag tag in
+    match Image.get image with
+    | Error er ->
+      can't_find tag (Error.to_string_hum er);
+      false
+    | Ok () ->
+      let cmd = {|[ -f /artifact ] && echo "Found" || echo "Not found"|} in
+      match Image.run ~interactive:true image cmd with
+      | Some x when String.strip x = "Found" -> true
+      |  _ ->
+        can't_find tag "no such file in image";
+        false
+
+
+  let file_of_name name =
+    if Sys.file_exists name then Some (File.create name)
+    else if artifact_exists name then
+      Some (File.create ~image:(with_tag name) "/artifact")
+    else None
+
+  let find name =
+    match file_of_name name with
+    | None -> None
+    | Some file ->
+      Some (Artifact.create ~file name)
+
+end
+
+let create_artifact name =
+  match Bap_artifact.find name with
+  | None ->
+    eprintf "didn't find artifact %s, skipping ... \n" name;
+    None
+  | a -> a
+
 
 let find_recipe tool r =
   let name = Cmd.requested_name r in
@@ -60,30 +106,54 @@ let print_bap_version_and_exit tool =
   printf "bap version: %s\n" @@Tool.bap_version tool;
   exit 0
 
-let print_and_exit tool recipes version =
-  if recipes then print_recipes_and_exit tool;
-  if version then print_bap_version_and_exit tool
+let print_artifacts_and_exit () =
+  let images = Image.tags (Lazy.force Bap_artifact.image) in
+  List.iter images ~f:(fun tag -> printf "%s\n" tag);
+  exit 0
 
-let create tool mode ctxt print_recipes print_bap_version conf out store update j =
+let print_and_exit tool recipes version artifacts =
+  if recipes then print_recipes_and_exit tool;
+  if version then print_bap_version_and_exit tool;
+  if artifacts then print_artifacts_and_exit ()
+
+let create tool mode ctxt print_recipes print_bap_ver print_artis conf out store update j =
   let tool = tool () in
-  print_and_exit tool print_recipes print_bap_version;
+  print_and_exit tool print_recipes print_bap_ver print_artis;
   let mode = mode tool in
   let ctxt = ctxt tool in
   Fields.create mode ctxt conf out store update j
 
-let is_nothing_to_do xs =
+let check_if_nothing_to_do xs =
+  let check what is_empty =
+    if is_empty then
+      let () = eprintf
+        "there nothing I can do: the list of %s is empty\n" what in
+      exit 1 in
   let names = List.map xs ~f:fst in
   let recipes = List.map xs ~f:snd in
-  List.for_all names ~f:List.is_empty ||
-  List.for_all recipes ~f:List.is_empty
+  check "artifacts" @@ List.for_all names ~f:List.is_empty;
+  check "recipes"   @@ List.for_all recipes ~f:List.is_empty
 
 let make_run tool = function
   | Error er ->
     eprintf "%s\n" @@ Error.to_string_hum er;
     exit 1
-  | Ok xs ->
-     if is_nothing_to_do xs then Nothing
-     else Run_artifacts xs
+  | Ok tasks ->
+    let tasks,_ =
+      List.fold tasks ~init:([],Map.empty (module String))
+        ~f:(fun (tasks,known) (artis,recipes) ->
+            let artis,known =
+              List.fold artis ~init:([],known) ~f:(fun (artis,known) name ->
+                  match Map.find known name with
+                  | Some a -> a :: artis, known
+                  | None -> match create_artifact name with
+                    | None -> artis, known
+                    | Some a ->
+                      a :: artis,
+                      Map.set known name a) in
+            (List.rev artis, recipes) :: tasks, known) in
+     check_if_nothing_to_do tasks;
+     Run_artifacts tasks
 
 let infer_mode config of_schedule of_file of_incidents artifacts recipes tool =
   let (>>=) = Or_error.(>>=) in
@@ -135,6 +205,6 @@ let options =
                   $artifacts $recipes in
   let tool = const tool_of_string $tool in
   const create $tool $mode $ctxt
-  $list_recipes $bap_version
+  $list_recipes $bap_version $list_artifacts
   $confirms $report
   $store $update $jobs
