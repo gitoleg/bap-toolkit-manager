@@ -86,14 +86,28 @@ let man = [
       $(mname) --list-artifacts";
 
   `S "Description";
-  `P "A frontend to the whole bap and docker infrastructure,
-        that hides all the complexity under the hood: no bap
-        installation required, no manual pulling of docker
-        images needed.";
 
-  `P  "It allows easily to run
-        the various of checks against the various of artifacts
-        and get a frendly HTML report with all the incidents found.";
+  `P "A frontend to the whole bap and docker infrastructure
+      that hides all the complexity under the hood: no bap
+      installation required, no manual pulling of docker
+      images needed, no complex command line options needed.";
+
+  `P "It allows easily to run the various of checks against the various
+      of artifacts and get a frendly HTML report with all the
+      incidents found. An artifact is out parlance is just a file
+      that is an object of analysis.";
+
+  `P "The whole idea of framework is based on the next formula:
+      $(b, Artifact + Recipe = Report).
+      And everything else is just a fairly small set of useful options
+      to make a result better to look and/or easier to get.";
+
+  `P  "Also, $(mname) records the information provided both by
+       BAP and a particular analysis: BIR program, assembly,
+       logs, error messages and etc. A storage with this data is
+       called a $(i,journal). A journal is created for each
+       combination of artifact and analysis and phisically represented
+       as an archive on a hard drive.";
 
 ]
 
@@ -114,7 +128,7 @@ let strings = Arg.(list string)
 let artifacts =
   let doc = "A comma-separated list of artifacts to check.
              Every artifact is either a file in the system
-             or a TAG from binaryanalysisplatform/bap-artifacts
+             or a TAG from $(i,binaryanalysisplatform/bap-artifacts)
              docker image" in
   Arg.(value & opt_all strings [] & info ["artifacts"; "a"] ~doc)
 
@@ -129,11 +143,14 @@ let recipes : Recipes.t list Term.t =
   Arg.(value & opt_all Recipes.conv [] & info ["recipes"; "r"] ~doc)
 
 let confirms =
-  let doc = "file with confirmations" in
+  let doc = "file with confirmations.
+  A confirmation is a file with the of expectations from
+  an application of an analysis to an artifact. It can alter
+  an appearance of incidents in a report." in
   Arg.(value & opt (some non_dir_file) None & info ["confirmations"; "c"] ~doc)
 
 let report =
-  let doc = "file with html report" in
+  let doc = "an output file with html report" in
   Arg.(value & opt string "results.html" & info ["report";] ~doc)
 
 let list_recipes =
@@ -155,7 +172,7 @@ let of_incidents =
 let tool =
   let default = "binaryanalysisplatform/bap-toolkit:latest" in
   let doc = "A tool used to run analysis.
-             Tags could be fed as expected, with ':' separator.
+             Tags could be fed as expected, with the ':' separator.
              A special keyword $(b,host) can be used to use host
              bap and recipes" in
   let tool_info = Arg.info ["tool"; "t"] ~doc in
@@ -176,26 +193,37 @@ let update =
 
 let of_file =
   let doc = "create a report from previously stored data" in
-  Arg.(value & opt (some string) None & info ["from"; "f"] ~doc)
+  Arg.(value & opt (some string) None & info ["from";] ~doc)
 
 let limits =
   let doc =
     "Set a memory/time limit per running recipe.
      Job will be canceled if a limit exceeded be canceled.
      Possible limitations:
-      time:
+     for time:
         10s - 10 seconds
         10m - 10 minutes
-        10h - 10 hours
-      resident memory:
+        10h - 10 hours;
+     for resident memory:
         10Mb - 10 Megabytes
         10Gb - 10 Gigabytes" in
   Arg.(value & opt_all Limit_arg.conv [] & info ["limit"; ] ~doc)
 
 let verbose =
-  let doc = "Preserves BIR and assembler output, true by default" in
+  let doc = "Establish a high level of verbosity for a journal,
+  so it will save as much of the information as possible.
+  If set to $(i,false), then no BIR of assembly output will be
+  stored, but it can make an analysis run faster" in
   Arg.(value & opt bool true & info ["verbose";] ~doc)
 
 let jobs =
   let doc = "Run few analysis simultaneously" in
   Arg.(value & opt int 1 & info ["jobs"; "j"] ~doc)
+
+let disable_journal =
+  let doc = "Don't preserve the results of an analysis" in
+  Arg.(flag & info ["disable-journal"] ~doc)
+
+let workdir =
+  let doc = "Stores all the journals directory" in
+  Arg.(value & opt string "/tmp" & info ["workdir";] ~doc)

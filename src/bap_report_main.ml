@@ -5,21 +5,21 @@ open Bap_report_options
 module Run = struct
 
   type task = {
-    arti : artifact;
+    artifact : artifact;
     journals : journal list
   }
 
   type t = {
-    ctxt  : Job.ctxt;
-    tasks : task String.Map.t;
+    ctxt      : Job.ctxt;
+    tasks     : task String.Map.t;
     output    : string;
     store     : string option;
     expected  : Incident.Kind.Set.t Journal.Map.t;
     confirmed : confirmation Incident.Id.Map.t String.Map.t;
   }
 
-  let new_task arti = {
-    arti;
+  let new_task artifact = {
+    artifact;
     journals = []
   }
 
@@ -115,7 +115,7 @@ module Run = struct
       | None -> true
       | Some names -> Set.mem names name in
     Map.fold t.tasks ~init:[] ~f:(fun ~key:name ~data  artis ->
-        if mem name then data.arti :: artis
+        if mem name then data.artifact :: artis
         else artis)
 
   let render ?ready t =
@@ -162,7 +162,7 @@ module Run = struct
   let notify_started j =
     printf "%s: started %s\n%!" (startup_time ()) (Job.name j)
 
-  let name_of_task t = Artifact.name t.arti
+  let name_of_task t = Artifact.name t.artifact
 
   let update_task t task journal =
     print_errors journal;
@@ -170,8 +170,8 @@ module Run = struct
     let time = Journal.time journal in
     let expected = find_expected t journal in
     let missed = missed_kinds expected incs in
-    let checks = Artifact.checks task.arti in
-    let arti = List.fold missed ~init:task.arti
+    let checks = Artifact.checks task.artifact in
+    let arti = List.fold missed ~init:task.artifact
         ~f:(fun arti kind ->
             let a = Artifact.no_incidents arti kind in
             match time with
@@ -181,7 +181,7 @@ module Run = struct
     let diff = check_diff (Artifact.checks arti) checks in
     let arti = update_time arti diff time in
     let arti = confirm t.confirmed arti diff in
-    let task = { task with arti } in
+    let task = { task with artifact=arti } in
     {t with tasks = Map.set t.tasks (Artifact.name arti) task}
 
   let run_seq t jobs =
@@ -280,4 +280,10 @@ let _ =
    TODO: maybe rewise all the directories/archives creation:
          maybe make more distiguive names or place everything in the
          temp dir
-   TODO: check limits once more again *)
+   TODO: check limits once more again
+   TODO: set limits back ? in the case of host
+   TODO: try to launch on a fresh system. Is true that we'll pull the
+         images ?
+   TODO: also, journals and storing to db looks a little bit redundant
+
+*)
