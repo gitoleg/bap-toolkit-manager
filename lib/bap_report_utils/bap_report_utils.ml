@@ -11,6 +11,6 @@ let cmd fmt =
       | Unix.WEXITED 0 -> Some res
       | s -> raise (Command_failed s)
     with e ->
-      eprintf "command '%s' failed: %s\n" c (Exn.to_string e);
+      (* eprintf "command '%s' failed: %s\n" c (Exn.to_string e); *)
       None in
   ksprintf run fmt

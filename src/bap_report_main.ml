@@ -2,6 +2,8 @@ open Core_kernel
 open Bap_report.Std
 open Bap_report_options
 
+module IO = Bap_report_io
+
 module Run = struct
 
   type task = {
@@ -78,7 +80,7 @@ module Run = struct
     | Some (file,update) ->
       let t =
         if update then
-          let artis = Bap_report_io.read file in
+          let artis = IO.Artifacts.read file in
           List.fold artis ~init:t ~f:(fun t a -> add_task t a)
         else t in
       {t with store = Some file}
@@ -159,8 +161,13 @@ module Run = struct
     let t = gettimeofday () |> localtime in
     sprintf "%02d:%02d:%02d" t.tm_hour t.tm_min t.tm_sec
 
-  let notify_started j =
-    printf "%s: started %s\n%!" (startup_time ()) (Job.name j)
+  let notify_started' job_name =
+    printf "%s started %s\n%!" (startup_time ())  job_name
+
+  let notify_finished' job_name =
+    printf "%s finished %s\n%!" (startup_time ())  job_name
+
+  let notify_started j = notify_started' (Job.name j)
 
   let name_of_task t = Artifact.name t.artifact
 
@@ -198,21 +205,49 @@ module Run = struct
           render t ~ready;
           t, ready) |> fst
 
+  let try_read ch =
+    try IO.Msg.read ch
+    with _ -> None
+
   let run_threads ctxt ts =
-    let run jobs =
+    let run fd jobs =
+      let ch = Unix.out_channel_of_descr fd in
       List.iter jobs ~f:(fun j ->
-          ignore @@ Job.run ctxt j) in
+          IO.Msg.(write ch (Job_started (Job.name j)));
+          ignore @@ Job.run ctxt j;
+          IO.Msg.(write ch (Job_finished (Job.name j))));
+      Unix.close fd in
     let rec loop acc = function
       | [] -> acc
       | t :: ts ->
-        List.iter t ~f:notify_started;
+        let (read,write) = Unix.pipe () in
+        let () = Unix.set_nonblock read in
         match Unix.fork () with
         | 0 ->
+          Unix.close read;
           List.iter ~f:Unix.close Unix.[stdout; stderr; stdin];
-          run t;
+          run write t;
           exit 0
-        | pid -> loop (pid :: acc) ts in
-    let waits = loop [] ts in
+        | pid ->
+          Unix.close write;
+          loop ((read,pid) :: acc) ts in
+    let rec read_all = function
+      | [] -> ()
+      | ch :: xs ->
+        match try_read ch with
+        | Some (IO.Msg.Job_finished name) ->
+          notify_finished' name;
+          read_all xs
+        | Some (IO.Msg.Job_started name) ->
+          notify_started' name;
+          read_all (xs @ [ch] )
+        | None -> read_all (xs @ [ch]) in
+    let execed = loop [] ts in
+    let waits = List.map ~f:snd execed in
+    let reads = List.map ~f:fst execed in
+    let reads' = List.map ~f:Unix.in_channel_of_descr reads in
+    let () = read_all reads' in
+    List.iter reads ~f:Unix.close;
     List.iter waits ~f:(fun pid ->
         ignore @@ Unix.waitpid [] pid)
 
@@ -239,7 +274,7 @@ module Run = struct
   let save t =
     match t.store with
     | None -> ()
-    | Some file -> Bap_report_io.dump file (artifacts t)
+    | Some file -> IO.Artifacts.dump file (artifacts t)
 
   let run t xs j =
     let t,jobs = prepare_jobs t xs in
@@ -258,7 +293,7 @@ module Run = struct
     render t
 
   let of_db t db =
-    let artis = Bap_report_io.read db in
+    let artis = IO.Artifacts.read db in
     let t = List.fold artis ~init:t ~f:add_task in
     render t
 end
