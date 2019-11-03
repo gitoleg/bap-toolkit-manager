@@ -13,22 +13,22 @@ let create ?image path = image, path
 let image = fst
 let path = snd
 
-let size (image,path) =
-  let size = match image with
+let size (image,path) = match image with
+    | None ->
+      let s = Unix.stat path in
+      Some Unix.(s.st_size)
     | Some image ->
-      Image.run image (sprintf "stat -c%%s %s" path)
-    | None -> cmd "stat -c%%s %s" path in
-  match size with
-  | None -> None
-  | Some s ->
-    let s = String.strip s in
-    try Some (int_of_string s)
-    with _ -> None
+      match Image.run image (sprintf "stat -c%%s %s" path) with
+      | None -> None
+      | Some s ->
+        let s = String.strip s in
+        try Some (int_of_string s)
+        with _ -> None
 
 let same_image im im' = match im,im' with
   | None, None -> true
   | Some im, Some im' ->
-     String.equal (Image.to_string im) (Image.to_string im')
+    String.equal (Image.to_string im) (Image.to_string im')
   | _ -> false
 
 let same_path = String.equal
