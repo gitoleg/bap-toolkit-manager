@@ -3,6 +3,7 @@ open Bap_report.Std
 open Bap_report_options
 
 module IO = Bap_report_io
+module Progress = Bap_report_progress
 
 module Run = struct
 
@@ -209,44 +210,63 @@ module Run = struct
     try IO.Msg.read ch
     with _ -> None
 
+
+  let fork f =
+    let (read,write) = Unix.pipe () in
+    Unix.set_nonblock read;
+    match Unix.fork () with
+    | 0 ->
+       Unix.close read;
+       List.iter ~f:Unix.close Unix.[stdout; stderr; stdin];
+       f write;
+       Unix.close write;
+       exit 0
+    | pid ->
+       Unix.close write;
+       read,pid
+
+  let ticks fd =
+    let ch = Unix.out_channel_of_descr fd in
+    let rec loop () =
+      Unix.sleep 1;
+      IO.Msg.(write ch Tick);
+      loop () in
+    loop ()
+
   let run_threads ctxt ts =
-    let run fd jobs =
+    let run jobs fd =
+      let open IO.Msg in
       let ch = Unix.out_channel_of_descr fd in
       List.iter jobs ~f:(fun j ->
-          IO.Msg.(write ch (Job_started (Job.name j)));
+          write ch (Job_started (Job.name j));
           ignore @@ Job.run ctxt j;
-          IO.Msg.(write ch (Job_finished (Job.name j))));
-      Unix.close fd in
+          write ch (Job_finished (Job.name j))) in
     let rec loop acc = function
       | [] -> acc
       | t :: ts ->
-        let (read,write) = Unix.pipe () in
-        let () = Unix.set_nonblock read in
-        match Unix.fork () with
-        | 0 ->
-          Unix.close read;
-          List.iter ~f:Unix.close Unix.[stdout; stderr; stdin];
-          run write t;
-          exit 0
-        | pid ->
-          Unix.close write;
-          loop ((read,pid) :: acc) ts in
+         let chld = fork (run t) in
+         loop (chld :: acc) ts in
     let rec read_all = function
-      | [] -> ()
+      | [_] | [] -> ()
       | ch :: xs ->
-        match try_read ch with
-        | Some (IO.Msg.Job_finished name) ->
-          notify_finished' name;
-          read_all xs
-        | Some (IO.Msg.Job_started name) ->
-          notify_started' name;
-          read_all (xs @ [ch] )
-        | None -> read_all (xs @ [ch]) in
+         match try_read ch with
+         | Some (IO.Msg.Tick as msg) ->
+            Progress.render msg;
+            read_all (xs @ [ch])
+         | Some ((IO.Msg.Job_finished name) as msg) ->
+            Progress.render msg;
+            read_all xs
+         | Some ((IO.Msg.Job_started name) as msg) ->
+            Progress.render msg;
+            read_all (xs @ [ch] )
+         | None -> read_all (xs @ [ch]) in
+    let read_ticks, ticks = fork ticks in
     let execed = loop [] ts in
     let waits = List.map ~f:snd execed in
     let reads = List.map ~f:fst execed in
-    let reads' = List.map ~f:Unix.in_channel_of_descr reads in
+    let reads' = List.map ~f:Unix.in_channel_of_descr (read_ticks :: reads) in
     let () = read_all reads' in
+    Unix.kill ticks Sys.sigkill;
     List.iter reads ~f:Unix.close;
     List.iter waits ~f:(fun pid ->
         ignore @@ Unix.waitpid [] pid)

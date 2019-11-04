@@ -89,6 +89,7 @@ module Msg = struct
   type t =
     | Job_started of string
     | Job_finished of string
+    | Tick
   [@@deriving bin_io]
 
   let write ch msg =

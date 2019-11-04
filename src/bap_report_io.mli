@@ -9,6 +9,7 @@ module Msg : sig
   type t =
     | Job_started of string
     | Job_finished of string
+    | Tick
     [@@deriving bin_io]
 
   val read : in_channel -> t option
