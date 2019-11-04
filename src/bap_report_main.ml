@@ -246,26 +246,23 @@ module Run = struct
       | t :: ts ->
          let chld = fork (run t) in
          loop (chld :: acc) ts in
-    let rec read_all = function
+    let rec listen = function
       | [_] | [] -> ()
       | ch :: xs ->
          match try_read ch with
-         | Some (IO.Msg.Tick as msg) ->
+         | None -> listen (xs @ [ch])
+         | Some msg ->
             Progress.render msg;
-            read_all (xs @ [ch])
-         | Some ((IO.Msg.Job_finished name) as msg) ->
-            Progress.render msg;
-            read_all xs
-         | Some ((IO.Msg.Job_started name) as msg) ->
-            Progress.render msg;
-            read_all (xs @ [ch] )
-         | None -> read_all (xs @ [ch]) in
+            match msg with
+            | IO.Msg.Tick | IO.Msg.Job_started _ -> listen (xs @ [ch])
+            | IO.Msg.Job_finished _ -> listen xs in
+    Progress.enable ();
     let read_ticks, ticks = fork ticks in
     let execed = loop [] ts in
     let waits = List.map ~f:snd execed in
     let reads = List.map ~f:fst execed in
     let reads' = List.map ~f:Unix.in_channel_of_descr (read_ticks :: reads) in
-    let () = read_all reads' in
+    let () = listen reads' in
     Unix.kill ticks Sys.sigkill;
     List.iter reads ~f:Unix.close;
     List.iter waits ~f:(fun pid ->

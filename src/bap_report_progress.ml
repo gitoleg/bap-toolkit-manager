@@ -12,8 +12,7 @@ type task = {
 
 let t = String.Table.create ()
 let counter = ref 0
-let timer = ref (Unix.gettimeofday ())
-
+let timer = ref 0.0
 
 module Ansi = struct
   let pp_pos ppf (x,y) = fprintf ppf "\027[%i;%iH%!" y x
@@ -34,14 +33,14 @@ let to_hms t =
 
 let pp fmt = fprintf err_formatter fmt
 
-let start () =
+let enable () =
+  timer := Unix.gettimeofday ();
   pp "%t%a" Ansi.pp_clear Ansi.pp_pos (1,1)
 
 let finish () =
   let len = Hashtbl.length t in
-  pp "%a" Ansi.pp_pos (1,1 + len)
+  pp "%a" Ansi.pp_pos (1,1 + 1 + len)
 
-let () = start ()
 let () = at_exit finish
 
 let update_time () =
@@ -64,8 +63,8 @@ let string_of_time tm =
 
 let update = function
   | Msg.Job_started name ->
-     let index = !counter in
      incr counter;
+     let index = !counter in
      Hashtbl.set t name {name;index; status = "running"; elapsed = 0.0}
   | Msg.Tick -> update_time ()
   | Msg.Job_finished name ->
@@ -78,5 +77,6 @@ let cmp x y = Int.compare x.index y.index
 let render msg =
   update msg;
   let items = List.sort (Hashtbl.data t) ~compare:cmp in
+  pp "%aTime        Status          Job name" Ansi.pp_pos (1,1);
   List.iter items ~f:(fun {name;index;status;elapsed} ->
       pp "%a%s   %-10s %s" Ansi.pp_pos (1,1 + index) (to_hms elapsed) status name)
