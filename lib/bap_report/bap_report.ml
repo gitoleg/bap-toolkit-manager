@@ -5,7 +5,7 @@ module Std = struct
   module Limit  = Bap_report_limit
   module Recipe = Bap_report_recipe
   module Job  = Bap_report_job
-  module Journal = Bap_report_script.Journal
+  module Journal = Bap_report_journal
   module Tool = Bap_report_tool
 
   type recipe = Recipe.t

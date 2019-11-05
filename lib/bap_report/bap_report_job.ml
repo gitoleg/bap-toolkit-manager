@@ -5,7 +5,7 @@ open Bap_report_read
 
 module Recipe  = Bap_report_recipe
 module Script  = Bap_report_script
-module Journal = Script.Journal
+module Journal = Bap_report_journal
 module Limit   = Bap_report_limit
 module Tool    = Bap_report_tool
 
