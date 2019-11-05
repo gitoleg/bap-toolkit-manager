@@ -1,3 +1,4 @@
+open Core_kernel
 open Bap_report_types
 
 type recipe = Bap_report_recipe.t
@@ -14,7 +15,7 @@ val context : ?verbose:bool -> ?limit:limit -> tool -> ctxt
 
 val prepare : ctxt -> recipe -> file -> steady t
 
-val run : ctxt -> steady t -> ready t
+val run : ctxt -> steady t -> ready t Or_error.t
 
 val journal : 'a t -> Bap_report_script.journal
 

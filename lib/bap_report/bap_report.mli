@@ -108,7 +108,7 @@ module Std : sig
       val run :
         ?interactive:bool ->
         ?entry:string ->
-        ?mount:string * string -> image -> string -> string option
+        ?mount:string * string -> image -> string -> string Or_error.t
 
     end
 
@@ -270,7 +270,7 @@ module Std : sig
     val prepare : ctxt -> recipe -> file -> steady t
 
     (** [run ctxt prepared] runs the prepared job *)
-    val run : ctxt -> steady t -> ready t
+    val run : ctxt -> steady t -> ready t Or_error.t
 
     (** [journal j] returns a journal where the result of
         the job [j] are stored *)

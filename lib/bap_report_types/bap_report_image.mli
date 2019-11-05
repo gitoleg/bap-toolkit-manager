@@ -15,4 +15,4 @@ val tag  : t -> string option
 val run :
   ?interactive:bool ->
   ?entry:string ->
-  ?mount:string * string -> t -> string -> string option
+  ?mount:string * string -> t -> string -> string Or_error.t

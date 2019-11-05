@@ -41,8 +41,8 @@ module Bap_artifact = struct
     | Ok () ->
       let cmd = {|[ -f /artifact ] && echo "Found" || echo "Not found"|} in
       match Image.run ~interactive:true image cmd with
-      | Some x when String.strip x = "Found" -> true
-      |  _ ->
+      | Ok x when String.strip x = "Found" -> true
+      | _ ->
         can't_find tag "no such file in image";
         false
 

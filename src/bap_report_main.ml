@@ -200,14 +200,19 @@ module Run = struct
     let ready = Set.empty (module String) in
     List.fold jobs ~init:(t,ready) ~f:(fun (t,ready) j ->
         notify_started j;
-        let j = Job.run t.ctxt j in
-        let journal = Job.journal j in
-        match find_by_journal t journal with
-        | None -> t,ready
-        | Some task ->
-          let t = update_task t task journal in
-          let ready = Set.add ready (name_of_task task) in
-          render t ~ready;
+        match Job.run t.ctxt j with
+        | Error er ->
+           eprintf "Job %s failed: %s \n"
+             (Job.name j) (Error.to_string_hum er);
+           t,ready
+        | Ok j ->
+           let journal = Job.journal j in
+           match find_by_journal t journal with
+           | None -> t,ready
+           | Some task ->
+              let t = update_task t task journal in
+              let ready = Set.add ready (name_of_task task) in
+              render t ~ready;
           t, ready) |> fst
 
   let try_read ch =
@@ -256,8 +261,9 @@ module Run = struct
       let ch = Unix.out_channel_of_descr fd in
       try
         write ch (`Job_started (Job.name j));
-        ignore @@ Job.run ctxt j;
-        write ch (`Job_finished (Job.name j))
+        match Job.run ctxt j with
+        | Ok _ -> write ch (`Job_finished (Job.name j))
+        | Error _ -> write ch (`Job_errored (Job.name j))
       with _ -> write ch (`Job_errored (Job.name j)) in
     let has_wait xs = List.exists xs ~f:(fun x -> x.wait) in
     let num_workers xs = List.count xs ~f:(fun x -> x.wait) in
@@ -281,10 +287,9 @@ module Run = struct
                match try_read x.chan with
                | None -> finished, x::running
                | Some msg ->
-                  log msg;
                   Progress.render msg;
                   match msg with
-                  | `Job_finished _ ->
+                  | `Job_finished _ | `Job_errored _ ->
                      In_channel.close x.chan;
                      x.pid :: finished, running
                   | _ -> finished, x::running) in

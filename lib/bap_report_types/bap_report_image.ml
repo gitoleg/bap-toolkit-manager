@@ -18,8 +18,8 @@ module Net_available = struct
 
   let tags image =
     match cmd "wget -q https://registry.hub.docker.com/v1/repositories/%s/tags -O -" image with
-    | None -> []
-    | Some s ->
+    | Error _ -> []
+    | Ok s ->
       let s = String.filter s ~f:(fun c -> c <> '"') in
       let s = String.tr s ~target:'}' ~replacement:' ' in
       let s = String.split ~on:' ' s in
@@ -36,8 +36,8 @@ module Net_available = struct
       | [_repo;name] -> name
       | _ -> name in
     match cmd "docker search %s" name' with
-    | None -> false
-    | Some s ->
+    | Error _ -> false
+    | Ok s ->
       match String.split ~on:'\n' s with
       | _header :: names ->
         let names = List.filter_map names
@@ -52,8 +52,8 @@ module Loc_available = struct
   let available =
     Lazy.from_fun (fun () ->
         match cmd "docker images" with
-        | None | Some "" -> []
-        | Some r ->
+        | Error _ | Ok "" -> []
+        | Ok r ->
           match String.split ~on:'\n' r with
           | [] | [_] -> []
           | _header :: images ->

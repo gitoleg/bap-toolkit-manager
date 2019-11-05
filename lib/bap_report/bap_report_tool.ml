@@ -46,13 +46,13 @@ let collect_recipes kind =
     | Host -> cmd "bap --list-recipes"
     | Image im -> Image.run im "--list-recipes" in
   match str with
-  | None | Some "" -> []
-  | Some s -> recipes_of_string s
+  | Error _ | Ok "" -> []
+  | Ok s -> recipes_of_string s
 
 let create kind =
   match find_bap_version kind with
-  | None -> Error (Error.of_string "bap not found!")
-  | Some bap_ver ->
+  | Error _ as er -> er
+  | Ok bap_ver ->
     let recipes = collect_recipes kind in
     Ok {kind;recipes;bap_ver}
 

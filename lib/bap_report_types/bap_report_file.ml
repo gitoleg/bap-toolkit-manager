@@ -19,8 +19,8 @@ let size (image,path) = match image with
       Some Unix.(s.st_size)
     | Some image ->
       match Image.run image (sprintf "stat -c%%s %s" path) with
-      | None -> None
-      | Some s ->
+      | Error _ -> None
+      | Ok s ->
         let s = String.strip s in
         try Some (int_of_string s)
         with _ -> None

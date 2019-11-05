@@ -32,8 +32,8 @@ module Journal = struct
 
   let tar_list tar =
     match cmd "tar -ztf %s" tar with
-    | None -> []
-    | Some s ->
+    | Error _ -> []
+    | Ok s ->
       List.filter_map ~f:(fun x ->
           let x = String.strip x in
           if String.is_empty x then None

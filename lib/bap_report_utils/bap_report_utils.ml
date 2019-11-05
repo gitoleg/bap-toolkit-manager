@@ -8,9 +8,9 @@ let cmd fmt =
       let inp = Unix.open_process_in c in
       let res = In_channel.input_all inp in
       match Unix.close_process_in inp with
-      | Unix.WEXITED 0 -> Some res
+      | Unix.WEXITED 0 -> Ok res
       | s -> raise (Command_failed s)
     with e ->
-      (* eprintf "command '%s' failed: %s\n" c (Exn.to_string e); *)
-      None in
+      Or_error.errorf
+        "command '%s' failed: %s\n" c (Exn.to_string e) in
   ksprintf run fmt

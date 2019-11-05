@@ -66,10 +66,9 @@ let context ?(verbose=true) ?(limit=Limit.empty) tool = {verbose; limit; tool}
 let apply tool entry =
   match Tool.image tool with
   | Some im ->
-    ignore @@
     Image.run im ~mount:(pwd (), drive)
       ~entry:(sprintf "%s/%s" drive @@ Filename.basename entry) ""
-  | None -> ignore @@ cmd "sh %s" entry
+  | None -> cmd "sh %s" entry
 
 let remove x =
   try Sys.remove x
@@ -90,9 +89,11 @@ let prepare {verbose; tool; limit} recipe file =
   {journal;payload={entry; arti=alias}; name}
 
 let run {tool;} ({payload={entry;arti}; } as t) =
-  apply tool entry;
+  let res = apply tool entry in
   remove arti;
   remove entry;
-  { t with payload = (); }
+  match res with
+  | Ok _ -> Ok { t with payload = (); }
+  | Error _ as er -> er
 
 let name t = t.name
