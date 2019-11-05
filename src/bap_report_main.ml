@@ -21,6 +21,12 @@ module Run = struct
     confirmed : confirmation Incident.Id.Map.t String.Map.t;
   }
 
+  type reader = {
+      pid  : int;
+      wait : bool;
+      chan : In_channel.t;
+  }
+
   let new_task artifact = {
     artifact;
     journals = []
@@ -162,13 +168,11 @@ module Run = struct
     let t = gettimeofday () |> localtime in
     sprintf "%02d:%02d:%02d" t.tm_hour t.tm_min t.tm_sec
 
-  let notify_started' job_name =
-    printf "%s started %s\n%!" (startup_time ())  job_name
+  let notify action job =
+    printf "%s %s %s\n%!" (startup_time ()) action (Job.name job)
 
-  let notify_finished' job_name =
-    printf "%s finished %s\n%!" (startup_time ())  job_name
-
-  let notify_started j = notify_started' (Job.name j)
+  let notify_started job = notify "started" job
+  let notify_finished job = notify "finished" job
 
   let name_of_task t = Artifact.name t.artifact
 
@@ -210,8 +214,7 @@ module Run = struct
     try IO.Msg.read ch
     with _ -> None
 
-
-  let fork f =
+  let reader ?(wait=true) f =
     let (read,write) = Unix.pipe () in
     Unix.set_nonblock read;
     match Unix.fork () with
@@ -223,63 +226,80 @@ module Run = struct
        exit 0
     | pid ->
        Unix.close write;
-       read,pid
+       {chan=Unix.in_channel_of_descr read; pid; wait}
 
   let ticks fd =
     let ch = Unix.out_channel_of_descr fd in
     let rec loop () =
       Unix.sleep 1;
-      IO.Msg.(write ch Tick);
+      IO.Msg.(write ch `Tick);
       loop () in
     loop ()
 
-  let run_threads ctxt ts =
-    let run jobs fd =
+  let incidents jobs fd =
+    let ch = Unix.out_channel_of_descr fd in
+    let incs = String.Table.create () in
+    List.iter jobs ~f:(fun j ->
+        Hashtbl.set incs (Job.name j) 0);
+    let rec loop () =
+      Unix.sleep 1;
+      List.iter jobs ~f:(fun job ->
+          let j = Job.journal job in
+          let incs = Journal.stat j in
+          IO.Msg.write ch (`Job_incidents (Job.name job, incs)));
+      loop () in
+    loop ()
+
+  let run_jobs ctxt jobs n =
+    let run j fd =
       let open IO.Msg in
       let ch = Unix.out_channel_of_descr fd in
-      List.iter jobs ~f:(fun j ->
-          write ch (Job_started (Job.name j));
-          ignore @@ Job.run ctxt j;
-          write ch (Job_finished (Job.name j))) in
-    let rec loop acc = function
-      | [] -> acc
-      | t :: ts ->
-         let chld = fork (run t) in
-         loop (chld :: acc) ts in
-    let rec listen = function
-      | [_] | [] -> ()
-      | ch :: xs ->
-         match try_read ch with
-         | None -> listen (xs @ [ch])
-         | Some msg ->
-            Progress.render msg;
-            match msg with
-            | IO.Msg.Tick | IO.Msg.Job_started _ -> listen (xs @ [ch])
-            | IO.Msg.Job_finished _ -> listen xs in
+      try
+        write ch (`Job_started (Job.name j));
+        ignore @@ Job.run ctxt j;
+        write ch (`Job_finished (Job.name j))
+      with _ -> write ch (`Job_errored (Job.name j)) in
+    let has_wait xs = List.exists xs ~f:(fun x -> x.wait) in
+    let num_workers xs = List.count xs ~f:(fun x -> x.wait) in
+    let can_add_workers running awaiting =
+      match awaiting with
+      | [] -> false
+      | _ -> num_workers running < n in
+    let rec loop finished awaiting running =
+      match running, awaiting with
+      | [],[] -> finished
+      | running, [] when not (has_wait running) -> finished
+      | running, awaiting when can_add_workers running awaiting ->
+         let dn = n - num_workers running in
+         let next = List.take awaiting dn in
+         let next = List.map next ~f:(fun j -> reader (run j)) in
+         loop finished (List.drop awaiting dn) (next @ running)
+      | running,awaiting ->
+         let finished, running =
+           List.fold running ~init:(finished,[])
+             ~f:(fun (finished,running) x ->
+               match try_read x.chan with
+               | None -> finished, x::running
+               | Some msg ->
+                  log msg;
+                  Progress.render msg;
+                  match msg with
+                  | `Job_finished _ ->
+                     In_channel.close x.chan;
+                     x.pid :: finished, running
+                  | _ -> finished, x::running) in
+         loop finished awaiting running in
     Progress.enable ();
-    let read_ticks, ticks = fork ticks in
-    let execed = loop [] ts in
-    let waits = List.map ~f:snd execed in
-    let reads = List.map ~f:fst execed in
-    let reads' = List.map ~f:Unix.in_channel_of_descr (read_ticks :: reads) in
-    let () = listen reads' in
-    Unix.kill ticks Sys.sigkill;
-    List.iter reads ~f:Unix.close;
+    let ticks = reader ~wait:false ticks in
+    let incs  = reader ~wait:false (incidents jobs) in
+    let waits = loop [] jobs [ticks; incs] in
     List.iter waits ~f:(fun pid ->
-        ignore @@ Unix.waitpid [] pid)
-
-  let plain_balance xs n =
-    let procs = Array.init n ~f:(fun _ -> []) in
-    let _ =
-      List.fold xs ~init:0
-        ~f:(fun i x ->
-            Array.set procs i (x :: procs.(i));
-            (i + 1) mod n) in
-    Array.to_list procs |> List.filter ~f:(fun x -> x <> [])
+        ignore @@ Unix.waitpid [] pid);
+    Unix.kill ticks.pid Sys.sigkill;
+    Unix.kill incs.pid  Sys.sigkill
 
   let run_parallel t jobs n =
-    let threads = plain_balance jobs n in
-    run_threads t.ctxt threads;
+    run_jobs t.ctxt jobs n;
     let t = List.fold jobs ~init:t ~f:(fun t j ->
         let journal = Job.journal j in
         match find_by_journal t journal with
@@ -295,9 +315,10 @@ module Run = struct
 
   let run t xs j =
     let t,jobs = prepare_jobs t xs in
-    match j with
-    | n when n < 2 -> run_seq t jobs |> save
-    | n -> run_parallel t jobs n |> save
+    match j,jobs with
+    | n,_ when n < 2 -> run_seq t jobs |> save
+    | _, [] | _, [_] -> run_seq t jobs |> save
+    | n,jobs -> run_parallel t jobs n |> save
 
   let of_incidents_file t filename =
     let name = Filename.remove_extension filename in
@@ -337,5 +358,6 @@ let _ =
    TODO: try to launch on a fresh system. Is true that we'll pull the
          images ?
    TODO: also, journals and storing to db looks a little bit redundant
-
+   TODO: optimize incidents number reading for progress: remember the
+         position somewhere
 *)

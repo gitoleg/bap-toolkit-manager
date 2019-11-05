@@ -245,6 +245,8 @@ module Std : sig
     (** [equal journal]  *)
     val equal : t -> t -> bool
 
+    val stat : ?pos:int64 -> t -> int
+
     include Identifiable.S with type t := t
   end
 

@@ -13,11 +13,20 @@ type journal = string  [@@deriving bin_io,compare,hash,sexp]
 let mytime = "mytime"
 let stdout = "bap.stdout"
 let stderr = "bap.stderr"
+let incidents_file = "incidents"
 
 module Journal = struct
   type t = journal  [@@deriving bin_io,compare,hash,sexp]
 
   let equal = String.equal
+
+  let fullname x = x ^ ".tgz"
+
+  let create x =
+    let full = fullname x in
+    if Sys.file_exists full then
+      Sys.remove full;
+    x
 
   let write dir = sprintf "tar czf %s.tgz %s" dir dir
 
@@ -34,7 +43,8 @@ module Journal = struct
   let tar_exists ~file tar =
     List.exists (tar_list tar) ~f:(fun s -> String.equal s file)
 
-  let read_tar ?target_dir target_file tar read =
+  let read_tar ?target_dir target_file t read =
+    let tar = fullname t in
     if Sys.file_exists tar then
       let dir = Filename.remove_extension tar in
       let path = match target_dir with
@@ -56,21 +66,35 @@ module Journal = struct
     try read_tar ?target_dir target_file tar read
     with _ -> None
 
-  let incidents tar =
+  let incidents t =
     let read f = Some (In_channel.with_file f ~f:Bap_report_read.incidents) in
-    match read_tar "incidents" tar read with
+    match read_tar incidents_file t read with
     | None -> []
     | Some incs -> incs
 
-  let errors tar =
-    match read_tar ~target_dir:"log" "log" tar Log.of_file with
+  let errors t =
+    match read_tar ~target_dir:"log" "log" t Log.of_file with
     | None -> []
     | Some log -> Log.errors log
 
-  let time tar =
-    match read_tar mytime tar Time.of_file with
+  let time t =
+    match read_tar mytime t Time.of_file with
     | None -> None
     | Some tm -> Time.elapsed tm
+
+  let stat ?(pos=0L) t =
+    let from_file f =
+      In_channel.with_file f ~f:(fun ch ->
+          In_channel.seek ch pos;
+          Bap_report_read.incidents ch) in
+    let read_from_tar t =
+      let read f = from_file f |> Option.some in
+      match read_tar incidents_file t read with
+      | None -> 0
+      | Some incs -> List.length incs in
+    try
+      from_file (sprintf "%s/%s" t incidents_file)  |> List.length
+    with _ -> read_from_tar t
 
   module T = struct
     type nonrec t = t [@@deriving bin_io,compare,hash,sexp]
@@ -100,7 +124,6 @@ type insn =
   | RunIt of run
 
 
-
 let string_of_run {path; recipe; watch; verbose} =
   String.concat ~sep:" " [
     if watch then sprintf "/usr/bin/time -v -o %s" mytime else "";
@@ -128,24 +151,13 @@ let render insns =
   let header = "#!/usr/bin/env sh\n"; in
   loop [header] insns |> String.concat ~sep:"\n"
 
-let create ~limit ~verbose ~watch ~pwd ~workdir ~path recipe =
-  render [
-    Limit limit;
-    Chdir pwd;
-    Mkdir workdir;
-    Chdir workdir;
-    RunIt {verbose;watch;recipe;path=sprintf "%s/%s" pwd path};
-    Chdir pwd;
-    Write workdir;
-    Rmdir workdir
-  ]
-
 let create
     ?(limit=Limit.empty)
     ?(verbose=true)
     ?(watch=true)
     ~pwd
     ~workdir ~path recipe =
+  let journal = Journal.create workdir in
   render [
     Limit limit;
     Chdir pwd;
@@ -153,6 +165,6 @@ let create
     Chdir workdir;
     RunIt {verbose;watch;recipe;path=sprintf "%s/%s" pwd path};
     Chdir pwd;
-    Write workdir;
+    Write journal;
     Rmdir workdir
-  ], workdir ^ ".tgz"
+  ], journal

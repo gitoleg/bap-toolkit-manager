@@ -6,11 +6,15 @@ module Artifacts : sig
 end
 
 module Msg : sig
-  type t =
-    | Job_started of string
-    | Job_finished of string
-    | Tick
-    [@@deriving bin_io]
+  type job_id = string [@@deriving bin_io, sexp]
+
+  type t = [
+    | `Job_started of job_id
+    | `Job_finished of job_id
+    | `Job_errored of job_id
+    | `Job_incidents of job_id * int
+    | `Tick
+  ] [@@deriving bin_io, sexp]
 
   val read : in_channel -> t option
   val write : out_channel -> t -> unit

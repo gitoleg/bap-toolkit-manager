@@ -12,6 +12,8 @@ module Journal : sig
   val time : t -> float option
   val equal : t -> t -> bool
 
+  val stat : ?pos:int64 -> t -> int
+
   include Identifiable.S with type t := t
 
 end
