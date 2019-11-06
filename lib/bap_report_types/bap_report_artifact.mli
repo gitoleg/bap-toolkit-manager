@@ -31,4 +31,6 @@ val find : t -> incident_id -> (incident * status) option
 
 val merge : t -> t -> t option
 
+val left_merge : t -> t -> t option
+
 val no_incidents: t -> incident_kind -> t

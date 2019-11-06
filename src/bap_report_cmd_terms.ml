@@ -183,17 +183,12 @@ let config =
              for display purposes." in
   Arg.(value & opt (some non_dir_file) None & info ["config";] ~doc)
 
-let store =
-  let doc = "store results in the file" in
-  Arg.(value & opt (some string) None & info ["store"] ~doc)
-
-let update =
-  let doc = "update file with results (e.g. run another analysis)" in
-  Arg.(value & flag & info ["update"] ~doc)
-
-let of_file =
-  let doc = "create a report from previously stored data" in
-  Arg.(value & opt (some string) None & info ["from";] ~doc)
+let with_file =
+  let doc =
+    "use a provided file to generate a report and/or store the results
+     of analysis. If the file existed before, then any repetitive data
+     will be overriden." in
+  Arg.(value & opt (some string) None & info ["with-file";] ~doc)
 
 let limits =
   let doc =
@@ -220,9 +215,9 @@ let jobs =
   let doc = "Run few analysis simultaneously" in
   Arg.(value & opt int 1 & info ["jobs"; "j"] ~doc)
 
-let disable_journal =
-  let doc = "Don't preserve the results of an analysis" in
-  Arg.(flag & info ["disable-journal"] ~doc)
+let enable_journals =
+  let doc = "Preserve the results of an analysis" in
+  Arg.(value & flag & info ["enable-journals"] ~doc)
 
 let workdir =
   let doc = "Stores all the journals directory" in

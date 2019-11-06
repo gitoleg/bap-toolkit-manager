@@ -74,24 +74,23 @@ module Run = struct
                 Artifact.update arti inc status
               | _ -> arti)
 
-  let create ?confirmations ?store ~output ctxt =
-    let t = {
+  let read_db t file =
+    match IO.Artifacts.read file with
+    | Error er ->
+       eprintf "can't read file %s: %s\n"
+         file (Error.to_string_hum er);
+       t
+    | Ok artis ->
+       List.fold artis ~init:t ~f:(fun t a -> add_task t a)
+
+  let create ?confirmations ?store ~output ctxt = {
       ctxt;
       tasks = Map.empty (module String);
       output;
       confirmed = read_confirmations confirmations;
       expected = Map.empty (module Journal);
-      store = None;
-    } in
-    match store with
-    | Some (file,update) ->
-      let t =
-        if update then
-          let artis = IO.Artifacts.read file in
-          List.fold artis ~init:t ~f:(fun t a -> add_task t a)
-        else t in
-      {t with store = Some file}
-    | None -> t
+      store;
+    }
 
   let prepare_jobs t xs =
     let find_task t a =
@@ -127,10 +126,14 @@ module Run = struct
         if mem name then data.artifact :: artis
         else artis)
 
-  let render ?ready t =
-    let doc = Template.render (artifacts ?names:ready t) in
-    Out_channel.with_file t.output
+  let render_artifacts output xs =
+    let doc = Template.render xs in
+    Out_channel.with_file output
       ~f:(fun ch -> Out_channel.output_string ch doc)
+
+  let render ?ready t =
+    let artis = artifacts ?names:ready t in
+    render_artifacts t.output artis
 
   let find_by_journal t j =
     Map.data t.tasks |>
@@ -150,12 +153,9 @@ module Run = struct
     | Some x -> x
     | None -> Set.empty (module Incident.Kind)
 
-  let check_equal x y = compare_incident_kind x y = 0
-
   let check_diff xs ys =
-    List.fold xs ~init:[] ~f:(fun ac c ->
-        if List.mem ys c ~equal:check_equal then ac
-        else c :: ac)
+    let of_list = Set.of_list (module Incident.Kind) in
+    Set.to_list @@ Set.diff (of_list xs) (of_list ys)
 
   let update_time arti checks = function
     | None -> arti
@@ -245,13 +245,15 @@ module Run = struct
     let ch = Unix.out_channel_of_descr fd in
     let incs = String.Table.create () in
     List.iter jobs ~f:(fun j ->
-        Hashtbl.set incs (Job.name j) 0);
+        Hashtbl.set incs (Job.name j) (0,0L));
     let rec loop () =
       Unix.sleep 1;
       List.iter jobs ~f:(fun job ->
           let j = Job.journal job in
-          let incs = Journal.stat j in
-          IO.Msg.write ch (`Job_incidents (Job.name job, incs)));
+          let num,bookmark = Hashtbl.find_exn incs (Job.name job) in
+          let num',bookmark' = Journal.incidents' ~bookmark j in
+          Hashtbl.set incs  (Job.name job) (num + num', bookmark');
+          IO.Msg.write ch (`Job_incidents (Job.name job, num + num')));
       loop () in
     loop ()
 
@@ -313,17 +315,42 @@ module Run = struct
     render t;
     t
 
-  let save t =
+  let run_jobs ~preserve_journals t xs j =
+    let t,jobs = prepare_jobs t xs in
+    let t = match j,jobs with
+      | n,_ when n < 2 -> run_seq t jobs
+      | _, [] | _, [_] -> run_seq t jobs
+      | n,jobs -> run_parallel t jobs n in
+    if not preserve_journals then
+      List.iter jobs ~f:(fun j -> Journal.remove (Job.journal j));
+    t
+
+  let run ?(preserve_journals=false) t xs j =
+    let of_artis xs =
+      List.fold xs ~init:(Map.empty (module String))
+        ~f:(fun m a -> Map.set m (Artifact.name a) a) in
+    let t = run_jobs ~preserve_journals t xs j in
     match t.store with
     | None -> ()
-    | Some file -> IO.Artifacts.dump file (artifacts t)
+    | Some f ->
+       let artis =
+         if Sys.file_exists f then
+           match IO.Artifacts.read f with
+           | Error er ->
+              eprintf "can't read file %s: %s\n"
+                f (Error.to_string_hum er);
+              []
+           | Ok artis -> artis
+         else [] in
+       let old_artis = of_artis artis in
+       let new_artis = of_artis (artifacts t) in
+       let artis = Map.merge new_artis old_artis ~f:(fun ~key -> function
+                       | `Left x | `Right x -> Some x
+                       | `Both (x,y) -> Artifact.left_merge x y) in
+       let artis = Map.data artis in
+       IO.Artifacts.dump f artis;
+       render_artifacts t.output artis
 
-  let run t xs j =
-    let t,jobs = prepare_jobs t xs in
-    match j,jobs with
-    | n,_ when n < 2 -> run_seq t jobs |> save
-    | _, [] | _, [_] -> run_seq t jobs |> save
-    | n,jobs -> run_parallel t jobs n |> save
 
   let of_incidents_file t filename =
     let name = Filename.remove_extension filename in
@@ -335,19 +362,16 @@ module Run = struct
     let t = add_task t artifact in
     render t
 
-  let of_db t db =
-    let artis = IO.Artifacts.read db in
-    let t = List.fold artis ~init:t ~f:add_task in
-    render t
+  let of_file t file = render @@ read_db t file
 end
 
 let main o =
-  let store = Option.map o.store ~f:(fun x -> x, o.update) in
-  let t = Run.create ?confirmations:o.confirms ?store ~output:o.output o.context in
+  let t = Run.create ?confirmations:o.confirms ?store:o.store ~output:o.output o.context in
   match o.mode with
   | From_incidents incs -> Run.of_incidents_file t incs
-  | From_stored db -> Run.of_db t db
-  | Run_artifacts tasks -> Run.run t tasks o.jobs
+  | From_stored file -> Run.of_file t file
+  | Run_artifacts tasks ->
+     Run.run ~preserve_journals:o.journaling t tasks o.jobs
 
 let _ =
   let open Cmdliner in
@@ -362,7 +386,4 @@ let _ =
    TODO: set limits back ? in the case of host
    TODO: try to launch on a fresh system. Is true that we'll pull the
          images ?
-   TODO: also, journals and storing to db looks a little bit redundant
-   TODO: optimize incidents number reading for progress: remember the
-         position somewhere
 *)

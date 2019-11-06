@@ -124,33 +124,34 @@ let find t id =
   | None -> None
   | Some incs -> Map.find incs id
 
-let merge_name a a' =
+let merge_origin a a' =
   if String.(a.name <> a'.name) then None
-  else Some a.name
+  else
+    match a.file, a'.file with
+    | Some f, Some f' when File.equal f f' -> Some (a.name, Some f)
+    | None, None -> Some (a.name, None)
+    | _ -> None
 
-let merge_file a a' =
-  match a.file, a'.file with
-  | Some f, Some f' when File.equal f f' -> `Ok (Some f)
-  | None, None -> `Ok None
-  | _ -> `Diff
-
-let merge_size a a' =
+let merge_size ?(merge_left=false) a a' =
   match a.size, a'.size with
   | Some s, Some s' when Int.(s = s') -> Some s
   | Some s, None | None, Some s -> Some s
+  | Some s, _ when merge_left -> Some s
   | _ -> None
 
-let merge_time a a' =
+let merge_time ?(merge_left=false) a a' =
   Map.merge a.time a'.time ~f:(fun ~key:_ -> function
       | `Left x | `Right x -> Some x
       | `Both (x,y) when Int.(int_of_float x = int_of_float y) -> Some x
+      | `Both (x,_) when merge_left -> Some x
       | _ -> None)
 
-let merge_status s s' = match s,s' with
+let merge_status ?(merge_left=false) s s' = match s,s' with
   | Undecided, x | x, Undecided -> Some x
+  | x,_ when merge_left -> Some x
   | _ -> None
 
-let merge_data a a' =
+let merge_data ?(merge_left=false) a a' =
   Map.merge a.data a'.data ~f:(fun ~key:_ -> function
       | `Left x | `Right x -> Some x
       | `Both (x,y) ->
@@ -158,18 +159,24 @@ let merge_data a a' =
         Map.merge x y ~f:(fun ~key:_ -> function
             | `Left x | `Right x -> Some x
             | `Both ((i,s),(_,s')) ->
-              match merge_status s s' with
+              match merge_status ~merge_left s s' with
               | Some s -> Some (i,s)
               | None -> None))
 
 let merge a a' =
-  match merge_name a a' with
+  match merge_origin a a' with
   | None -> None
-  | Some name ->
-     match merge_file a a' with
-     | `Diff -> None
-     | `Ok file ->
+  | Some (name,file) ->
     let size = merge_size a a' in
     let time = merge_time a a' in
     let data = merge_data a a' in
+    Some {name; file; size; time; data}
+
+let left_merge a a' =
+  match merge_origin a a' with
+  | None -> None
+  | Some (name,file) ->
+    let size = merge_size ~merge_left:true a a' in
+    let time = merge_time ~merge_left:true a a' in
+    let data = merge_data ~merge_left:true a a' in
     Some {name; file; size; time; data}

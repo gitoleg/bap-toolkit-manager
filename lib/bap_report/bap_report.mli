@@ -245,7 +245,14 @@ module Std : sig
     (** [equal journal]  *)
     val equal : t -> t -> bool
 
-    val stat : ?pos:int64 -> t -> int
+    (** [remove journal] removes the [journal] *)
+    val remove : t -> unit
+
+    (** [incidents' ~bookmark journal] returns a number
+        of incidents that could be read from the [journal] after
+        [bookmark]. returns a new bookmark that points to the end
+        of the journal at the moment of reading. *)
+    val incidents' : ?bookmark:int64 -> t -> int * int64
 
     include Identifiable.S with type t := t
   end
@@ -376,17 +383,17 @@ module Std : sig
     val checks : t -> incident_kind list
 
     (** [name artifact] returns a name of the [artifact] *)
-    val name   : t -> string
+    val name : t -> string
 
     (** [file artifact] returns a file that is corresponded to the [artifact]  *)
-    val file   : t -> file option
+    val file : t -> file option
 
     (** [size artifact] return a size (in bytes) of the [artifact]*)
-    val size   : t -> int option
+    val size : t -> int option
 
     (** [size_hum artifact] returns a human readable string
         with size of the [artifact] *)
-    val size_hum :  t -> string option
+    val size_hum : t -> string option
 
     (** [with_size artifact size] updates a size of the [artifact]*)
     val with_size : t -> int -> t
@@ -415,8 +422,13 @@ module Std : sig
          - [a] and [a'] refers to the same artifact
          - there are no contradictions in the information, e.g.
            if can't be that an incident from [a] is defined as false
-           negative and from [a'] as confirmed *)
+           negative and from [a'] as confirmed.*)
     val merge : t -> t -> t option
+
+    (** [merge a a'] the same as {merge} above, but takes an
+        information from the first artifact in case of
+        any contradictions *)
+    val left_merge : t -> t -> t option
 
   end
 

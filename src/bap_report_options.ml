@@ -18,8 +18,8 @@ type t = {
   confirms   : string option;
   output     : string;
   store      : string option;
-  update     : bool;
   jobs       : int;
+  journaling : bool;
 } [@@deriving fields]
 
 module Bap_artifact = struct
@@ -116,12 +116,13 @@ let print_and_exit tool recipes version artifacts =
   if version then print_bap_version_and_exit tool;
   if artifacts then print_artifacts_and_exit ()
 
-let create tool mode ctxt print_recipes print_bap_ver print_artis conf out store update j =
+let create tool mode ctxt print_recipes print_bap_ver print_artis conf
+      out store jobs journals =
   let tool = tool () in
   print_and_exit tool print_recipes print_bap_ver print_artis;
   let mode = mode tool in
   let ctxt = ctxt tool in
-  Fields.create mode ctxt conf out store update j
+  Fields.create mode ctxt conf out store jobs journals
 
 let check_if_nothing_to_do xs =
   let check what is_empty =
@@ -158,6 +159,8 @@ let make_run tool = function
 let infer_mode config of_schedule of_file of_incidents artifacts recipes tool =
   let (>>=) = Or_error.(>>=) in
   let config = read_config config in
+  let artis = List.concat artifacts in
+  let is_empty = List.is_empty in
   match of_schedule, of_file, of_incidents with
   | Some f,_,_ ->
     let acts = Bap_report_scheduled.of_file f in
@@ -169,11 +172,10 @@ let infer_mode config of_schedule of_file of_incidents artifacts recipes tool =
             create_recipes config tool s.recipes >>= fun rs ->
             Ok (([s.artifact], rs) :: acc)) in
     make_run tool rs
-  | _,Some f,_ -> From_stored f
+  | _,Some f,_ when is_empty artis && is_empty recipes -> From_stored f
   | _,_,Some f -> From_incidents f
   | _ ->
     let rs =
-      Ok (List.concat artifacts) >>= fun artis ->
       create_recipes config tool (List.concat recipes) >>= fun recipes ->
       Ok [artis,recipes] in
     make_run tool rs
@@ -201,10 +203,9 @@ let options =
   let ctxt = const context $limits $verbose in
   let mode = const infer_mode
                   $config $schedule
-                  $of_file $of_incidents
+                  $with_file $of_incidents
                   $artifacts $recipes in
   let tool = const tool_of_string $tool in
   const create $tool $mode $ctxt
   $list_recipes $bap_version $list_artifacts
-  $confirms $report
-  $store $update $jobs
+  $confirms $report $with_file $jobs $enable_journals

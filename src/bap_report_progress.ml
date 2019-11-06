@@ -106,7 +106,8 @@ let render msg =
   update msg;
   let items = List.sort (Hashtbl.data t) ~compare:cmp in
   pp "%t%a%-15s%-11s%-36s%s\n"
-    Ansi.pp_bold Ansi.pp_pos (1,1) "Time elapsed" "Status" "Job" "Incidents";
+    Ansi.pp_bold Ansi.pp_pos (1,1) "Time elapsed" "Status" "Job"
+    "Incidents #";
   pp "%t" Ansi.pp_norm;
   List.iter items ~f:(fun {name;index;status;elapsed; incidents} ->
       pp "%a%s       %-10s %-35s %d"

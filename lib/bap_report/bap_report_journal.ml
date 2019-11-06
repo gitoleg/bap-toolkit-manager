@@ -50,10 +50,6 @@ let read_tar ?target_dir target_file t read =
     else None
   else None
 
-let read ?target_dir target_file tar read =
-  try read_tar ?target_dir target_file tar read
-  with _ -> None
-
 let incidents t =
   let read f = Some (In_channel.with_file f ~f:Bap_report_read.incidents) in
   match read_tar incidents_file t read with
@@ -70,19 +66,28 @@ let time t =
   | None -> None
   | Some tm -> Time.elapsed tm
 
-let stat ?(pos=0L) t =
+let incidents' ?(bookmark=0L) t =
   let from_file f =
-    In_channel.with_file f ~f:(fun ch ->
-        In_channel.seek ch pos;
-        Bap_report_read.incidents ch) in
+    let ch = In_channel.create f in
+    In_channel.seek ch bookmark;
+    let incs = Bap_report_read.incidents ch in
+    let pos = In_channel.pos ch in
+    In_channel.close ch;
+    List.length incs, pos in
   let read_from_tar t =
     let read f = from_file f |> Option.some in
     match read_tar incidents_file t read with
-    | None -> 0
-    | Some incs -> List.length incs in
+    | None -> 0, bookmark
+    | Some x -> x in
   try
-    from_file (sprintf "%s/%s" t incidents_file)  |> List.length
+    from_file (sprintf "%s/%s" t incidents_file)
   with _ -> read_from_tar t
+
+let remove j =
+  let full = fullname j in
+  if Sys.file_exists full then
+    Sys.remove full
+
 
 module T = struct
   type nonrec t = t [@@deriving bin_io,compare,hash,sexp]

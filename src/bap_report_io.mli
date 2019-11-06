@@ -1,8 +1,9 @@
+open Core_kernel
 open Bap_report.Std
 
 module Artifacts : sig
-  val dump : ?update:bool -> string -> artifact list -> unit
-  val read : string -> artifact list
+  val dump : string -> artifact list -> unit
+  val read : string -> artifact list Or_error.t
 end
 
 module Msg : sig
@@ -16,6 +17,6 @@ module Msg : sig
     | `Tick
   ] [@@deriving bin_io, sexp]
 
-  val read : in_channel -> t option
-  val write : out_channel -> t -> unit
+  val read : In_channel.t -> t option
+  val write : Out_channel.t -> t -> unit
 end

@@ -29,9 +29,9 @@ type 'a t = {
 }
 
 type ctxt = {
-  tool    : tool;
-  limit   : limit;
-  verbose : bool;
+  tool       : tool;
+  limit      : limit;
+  verbose    : bool;
 }
 
 let drive = "/mydrive"
@@ -61,7 +61,8 @@ let workdir file recipe =
     | None -> sprintf "%s.%s" (Image.to_string im) recipe
     | Some tag -> sprintf "%s.%s" tag recipe
 
-let context ?(verbose=true) ?(limit=Limit.empty) tool = {verbose; limit; tool}
+let context ?(verbose=true) ?(limit=Limit.empty) tool =
+  {verbose; limit; tool;}
 
 let apply tool entry =
   match Tool.image tool with
@@ -74,7 +75,7 @@ let remove x =
   try Sys.remove x
   with _ -> ()
 
-let prepare {verbose; tool; limit} recipe file =
+let prepare {verbose; tool; limit;} recipe file =
   let name = sprintf "%s:%s" (File.path file) (Recipe.name recipe) in
   let alias = Filename.temp_file ~temp_dir:(pwd ()) "artifact" "" in
   copy_target file (Filename.basename alias);
