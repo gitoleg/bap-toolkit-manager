@@ -54,7 +54,7 @@ module Msg = struct
   type t = [
     | `Job_started of job_id
     | `Job_finished of job_id
-    | `Job_errored  of job_id
+    | `Job_errored  of job_id * string
     | `Job_incidents of job_id * int
     | `Tick
   ] [@@deriving bin_io, sexp]

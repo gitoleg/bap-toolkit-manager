@@ -15,12 +15,14 @@ type task = {
     index  : int;
     elapsed  : float;
     incidents : int;
+    error  : string option;
 }
 
 let t = String.Table.create ()
 let counter = ref 0
 let timer = ref 0.0
 let enabled = ref false
+let lines = ref 1
 
 let string_of_status s =
   Sexp.to_string (sexp_of_status s)
@@ -28,6 +30,7 @@ let string_of_status s =
 module Ansi = struct
   let pp_pos ppf (x,y) = fprintf ppf "\027[%i;%iH%!" y x
   let pp_clear ppf = fprintf ppf "\027[2J%!"
+  let pp_clear_line ppf = fprintf ppf "\027[J%!"
   let pp_bold ppf = fprintf ppf "\027[1m"
   let pp_norm ppf = fprintf ppf "\027[0m"
 end
@@ -51,10 +54,9 @@ let enable () =
   timer := Unix.gettimeofday ();
   pp "%t%a" Ansi.pp_clear Ansi.pp_pos (1,1)
 
-let finish () =
+ let finish () =
   if !enabled then
-    let len = Hashtbl.length t in
-    pp "%a" Ansi.pp_pos (1,1 + 1 + len)
+    pp "%a" Ansi.pp_pos (1,!lines)
 
 let () = at_exit finish
 
@@ -77,12 +79,21 @@ let string_of_time tm =
   sprintf "%02d:%02d:%02d"
             local.tm_hour local.tm_min local.tm_sec
 
-let new_task name =
+let mk_task name =
   incr counter;
-  let index = !counter in
-  Hashtbl.set t name
-    {name;index; status = Running; elapsed = 0.0; incidents = 0}
+  let index = !counter in {
+    name;
+    index;
+    status = Running;
+    elapsed = 0.0;
+    incidents = 0;
+    error = None;
+}
 
+
+let new_task name =
+  let task = mk_task name in
+  Hashtbl.set t name task
 
 let update = function
   | `Job_started name -> new_task name
@@ -95,25 +106,46 @@ let update = function
      Hashtbl.change t name ~f:(function
          | None -> None
          | Some t -> Some {t with status = Finished})
-  | `Job_errored name ->
-     Hashtbl.change t name ~f:(function
-         | None -> None
-         | Some t -> Some {t with status = Errored})
+  | `Job_errored (name, reason) ->
+     Hashtbl.update t name ~f:(function
+         | None ->
+            let task = mk_task name in
+            {task with status = Errored; error = Some reason}
+         | Some task -> {task with status = Errored; error = Some reason})
 
 let cmp x y = Int.compare x.index y.index
 
 let render msg =
   update msg;
   let items = List.sort (Hashtbl.data t) ~compare:cmp in
-  pp "%t%a%-5s%-15s%-11s%-36s%s\n"
-    Ansi.pp_bold Ansi.pp_pos (1,1) "#" "Time elapsed" "Status" "Job"
+  let line = 1 in
+  pp "%t%a%-5s%-15s%-11s%-36s%s"
+    Ansi.pp_bold Ansi.pp_pos (1,line) "#" "Time elapsed" "Status" "Job"
     "Incidents";
-  pp "%t" Ansi.pp_norm;
-  List.iter items ~f:(fun {name;index;status;elapsed; incidents} ->
-      pp "%a%-5d%s       %-10s %-35s %d"
-        Ansi.pp_pos (1,1 + index)
+  pp "%t\n" Ansi.pp_norm;
+  List.iter items ~f:(fun {name;index;status;elapsed;incidents;} ->
+      pp "%a%-5d%s       %-10s %-35s %d\n"
+        Ansi.pp_pos (1,line + index)
         index
         (to_hms elapsed)
         (string_of_status status)
         name
-        incidents)
+        incidents);
+  let line = List.length items + line + 1 in
+  let errs =
+    List.filter_map items
+      ~f:(fun x -> match x.error with
+        | None -> None
+        | Some er -> Some (x.name, er)) in
+  match errs with
+  | [] -> lines := line
+  | errs ->
+     pp "%a%t" Ansi.pp_pos (1, line) Ansi.pp_clear_line;
+     let line = line + 1 in
+     pp "%a%tErrors:%t%t\n" Ansi.pp_pos (1, line) Ansi.pp_bold
+       Ansi.pp_clear_line Ansi.pp_norm;
+     let line = line + 1 in
+     List.iteri errs ~f:(fun i (name,error) ->
+         pp "%a%-35s%s"
+           Ansi.pp_pos (1, i + line) name error);
+     lines := line + List.length errs

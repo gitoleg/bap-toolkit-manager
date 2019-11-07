@@ -247,7 +247,7 @@ module Run = struct
     List.iter jobs ~f:(fun j ->
         Hashtbl.set incs (Job.name j) (0,0L));
     let rec loop () =
-      Unix.sleep 1;
+      Unix.sleep 10;
       List.iter jobs ~f:(fun job ->
           let j = Job.journal job in
           let num,bookmark = Hashtbl.find_exn incs (Job.name job) in
@@ -265,8 +265,12 @@ module Run = struct
         write ch (`Job_started (Job.name j));
         match Job.run ctxt j with
         | Ok _ -> write ch (`Job_finished (Job.name j))
-        | Error _ -> write ch (`Job_errored (Job.name j))
-      with _ -> write ch (`Job_errored (Job.name j)) in
+        | Error er ->
+           let er = Error.to_string_hum er in
+           write ch (`Job_errored (Job.name j, er))
+      with exn ->
+        let er = Exn.to_string exn in
+        write ch (`Job_errored (Job.name j, er)) in
     let has_wait xs = List.exists xs ~f:(fun x -> x.wait) in
     let num_workers xs = List.count xs ~f:(fun x -> x.wait) in
     let can_add_workers running awaiting =
@@ -350,7 +354,6 @@ module Run = struct
        IO.Artifacts.dump f artis;
        render_artifacts t.output artis
 
-
   let of_incidents_file t filename =
     let name = Filename.remove_extension filename in
     let incidents = In_channel.with_file filename ~f:Read.incidents in
@@ -378,11 +381,10 @@ let _ =
   Term.eval (Term.(const main $options), info)
 
 (* TODO: install view file somewhere
-   TODO: maybe rewise all the directories/archives creation:
-         maybe make more distiguive names or place everything in the
-         temp dir
    TODO: check limits once more again
    TODO: set limits back ? in the case of host
    TODO: try to launch on a fresh system. Is true that we'll pull the
          images ?
+   TODO: maybe add a support for bap.1.x
+
 *)

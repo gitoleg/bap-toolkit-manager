@@ -30,17 +30,17 @@ let tar_list tar =
         else Some x) @@
     String.split ~on:'\n' s
 
-let tar_exists ~file tar =
+let tar_has ~file tar =
   List.exists (tar_list tar) ~f:(fun s -> String.equal s file)
 
 let read_tar ?target_dir target_file t read =
   let tar = fullname t in
   if Sys.file_exists tar then
-    let dir = Filename.remove_extension tar in
+    let dir = Filename.basename @@ Filename.remove_extension tar in
     let path = match target_dir with
       | None -> sprintf "%s/%s" dir target_file
       | Some dir' -> sprintf "%s/%s/%s" dir dir' target_file in
-    if tar_exists ~file:path tar then
+    if tar_has ~file:path tar then
       let _ = cmd "tar xzf %s %s" tar path in
       if Sys.file_exists path then
         let r = read path in

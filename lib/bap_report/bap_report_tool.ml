@@ -32,6 +32,7 @@ let split_on_first s ~on =
 
 let recipes_of_string s =
   let recipe_of_string s =
+    let s = String.strip s in
     match split_on_first ~on:[' '; '\t'] s with
     | name :: desc :: _ ->
       let name = String.strip name in
@@ -43,8 +44,8 @@ let recipes_of_string s =
 
 let collect_recipes kind =
   let str = match kind with
-    | Host -> cmd "bap --list-recipes"
-    | Image im -> Image.run im "--list-recipes" in
+    | Host -> cmd "bap print-recipes"
+    | Image im -> Image.run im "print-recipes" in
   match str with
   | Error _ | Ok "" -> []
   | Ok s -> recipes_of_string s
