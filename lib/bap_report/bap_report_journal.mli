@@ -4,6 +4,7 @@ type t
 
 val of_workdir : string -> t
 
+(* returns a command relatively to the (basename workdir*)
 val write_cmd : t -> string
 
 val incidents : t -> Bap_report_types.incident list

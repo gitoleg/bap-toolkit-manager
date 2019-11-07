@@ -8,7 +8,7 @@ type t = string  [@@deriving bin_io,compare,hash,sexp]
 
 let equal = String.equal
 
-let fullname x = x ^ ".tgz"
+let fullname x = sprintf "%s.tgz" x
 
 let of_workdir x =
   let full = fullname x in
@@ -16,7 +16,9 @@ let of_workdir x =
     Sys.remove full;
   x
 
-let write_cmd dir = sprintf "tar czf %s.tgz %s" dir dir
+let write_cmd t =
+  let dir = Filename.basename t in
+  sprintf "tar czf %s.tgz %s" dir dir
 
 let tar_list tar =
   match cmd "tar -ztf %s" tar with

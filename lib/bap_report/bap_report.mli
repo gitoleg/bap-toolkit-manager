@@ -266,12 +266,20 @@ module Std : sig
     type 'a t
     type ctxt
 
-    (** [context ~verbose ~limit tool] creates a context for a
+    type save = [
+      | `Nothing      (** Nothing to preserve  *)
+      | `Service      (** Preserve incidents, logs, bap stdout, bap stderr *)
+      | `Everything   (** Preserve all the available information *)
+    ]
+
+    (** [context ~save ~limit root tool] creates a context for a
         job in order to make it easy to repeat different jobs
         under the same context.
 
-        @param verbose saves bap BIR and asm output, true by default *)
-    val context : ?verbose:bool -> ?limit:limit -> tool -> ctxt
+        @param save is `Nothing by default
+
+        @param root is a directory where all jobs save theirs data. *)
+    val context : ?save:save -> ?limit:limit -> string -> tool -> ctxt
 
     (** [prepare ctxt recipe path ] prepares job to run *)
     val prepare : ctxt -> recipe -> file -> steady t

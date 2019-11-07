@@ -215,10 +215,18 @@ let jobs =
   let doc = "Run few analysis simultaneously" in
   Arg.(value & opt int 1 & info ["jobs"; "j"] ~doc)
 
-let enable_journals =
-  let doc = "Preserve the results of an analysis" in
-  Arg.(value & flag & info ["enable-journals"] ~doc)
+let journaling_level =
+  let doc =
+    "Set a desired level of information to preserve:
+     $(i,0) - don't save anything;
+     $(i,1) - save incidents and log files;
+     $(i,2) - save everything we can: incidents, BIR, assembly, etc ... " in
+  Arg.(value &
+       opt (enum ["0", `Nothing; "1", `Service; "2", `Everything])
+         `Nothing
+       & info ["journaling-level"] ~doc)
 
 let workdir =
-  let doc = "Stores all the journals directory" in
-  Arg.(value & opt string "/tmp" & info ["workdir";] ~doc)
+  let doc =
+    "Bap-toolkit working directory, all the journals are stored here" in
+  Arg.(value & opt string "/tmp/bap-toolkit.jobs" & info ["workdir";] ~doc)

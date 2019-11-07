@@ -117,12 +117,13 @@ let print_and_exit tool recipes version artifacts =
   if artifacts then print_artifacts_and_exit ()
 
 let create tool mode ctxt print_recipes print_bap_ver print_artis conf
-      out store jobs journals =
+      out store jobs journaling =
   let tool = tool () in
   print_and_exit tool print_recipes print_bap_ver print_artis;
   let mode = mode tool in
   let ctxt = ctxt tool in
-  Fields.create mode ctxt conf out store jobs journals
+  let journaling = journaling <> `Nothing in
+  Fields.create mode ctxt conf out store jobs journaling
 
 let check_if_nothing_to_do xs =
   let check what is_empty =
@@ -191,16 +192,16 @@ let tool_of_string s () =
     eprintf "can't find or create tool %s: %s" s (Error.to_string_hum er);
     exit 1
 
-let context limits verbose tool =
+let context limits save root tool =
   let limit = List.fold limits
       ~init:Limit.empty ~f:(fun l (n,q) -> Limit.add l n q) in
-  Job.context ~verbose ~limit tool
+  Job.context ~save ~limit root tool
 
 open Cmd
 open Term
 
 let options =
-  let ctxt = const context $limits $verbose in
+  let ctxt = const context $limits $journaling_level $workdir in
   let mode = const infer_mode
                   $config $schedule
                   $with_file $of_incidents
@@ -208,4 +209,4 @@ let options =
   let tool = const tool_of_string $tool in
   const create $tool $mode $ctxt
   $list_recipes $bap_version $list_artifacts
-  $confirms $report $with_file $jobs $enable_journals
+  $confirms $report $with_file $jobs $journaling_level

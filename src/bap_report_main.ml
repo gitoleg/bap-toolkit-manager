@@ -21,7 +21,7 @@ module Run = struct
     confirmed : confirmation Incident.Id.Map.t String.Map.t;
   }
 
-  type reader = {
+  type worker = {
       pid  : int;
       wait : bool;
       chan : In_channel.t;
@@ -219,7 +219,7 @@ module Run = struct
     try IO.Msg.read ch
     with _ -> None
 
-  let reader ?(wait=true) f =
+  let mk_worker ?(wait=true) f =
     let (read,write) = Unix.pipe () in
     Unix.set_nonblock read;
     match Unix.fork () with
@@ -280,7 +280,7 @@ module Run = struct
       | running, awaiting when can_add_workers running awaiting ->
          let dn = n - num_workers running in
          let next = List.take awaiting dn in
-         let next = List.map next ~f:(fun j -> reader (run j)) in
+         let next = List.map next ~f:(fun j -> mk_worker (run j)) in
          loop finished (List.drop awaiting dn) (next @ running)
       | running,awaiting ->
          let finished, running =
@@ -297,8 +297,8 @@ module Run = struct
                   | _ -> finished, x::running) in
          loop finished awaiting running in
     Progress.enable ();
-    let ticks = reader ~wait:false ticks in
-    let incs  = reader ~wait:false (incidents jobs) in
+    let ticks = mk_worker ~wait:false ticks in
+    let incs  = mk_worker ~wait:false (incidents jobs) in
     let waits = loop [] jobs [ticks; incs] in
     List.iter waits ~f:(fun pid ->
         ignore @@ Unix.waitpid [] pid);
@@ -337,8 +337,7 @@ module Run = struct
          if Sys.file_exists f then
            match IO.Artifacts.read f with
            | Error er ->
-              eprintf "can't read file %s: %s\n"
-                f (Error.to_string_hum er);
+              eprintf "can't read file %s: %s\n" f (Error.to_string_hum er);
               []
            | Ok artis -> artis
          else [] in
